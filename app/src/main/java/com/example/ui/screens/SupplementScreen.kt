@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -51,9 +52,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -124,6 +129,58 @@ fun SupplementScreen(
                     )
                 }
             )
+        }
+
+        // Photorealistic Supplement Laboratory Hero Banner
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(108.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, palette.border, RoundedCornerShape(16.dp))
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.img_stack_supps_hero_1795606978228),
+                    contentDescription = stringResource(R.string.cd_stack_hero),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0x440B0D11), Color(0xDC0B0D11))
+                            )
+                        )
+                )
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Column {
+                        Text(
+                            text = "DAILY BIO-TIMING & DOSE ALARMS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.amber
+                        )
+                        Text(
+                            text = "Precision Stack Consistency",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFFF8FAFC)
+                        )
+                    }
+                    StatusPill(
+                        text = "$activeAlarmsCount ALARMS",
+                        color = palette.amber
+                    )
+                }
+            }
         }
 
         // Supplement Compliance & Alarm Summary Strip

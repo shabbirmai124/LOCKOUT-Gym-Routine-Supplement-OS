@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,9 +55,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -159,6 +164,60 @@ fun TrainingScreen(
                     }
                 }
             )
+        }
+
+        // Photorealistic Iron & Dumbbell Studio Hero Banner
+        item {
+            val doneSets = state.activeDayExercises.sumOf { it.completedSets }
+            val totalSets = state.activeDayExercises.sumOf { it.targetSets }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(114.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, palette.border, RoundedCornerShape(16.dp))
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.img_training_hero_1795606983764),
+                    contentDescription = stringResource(R.string.cd_training_hero),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0x550B0D11), Color(0xE00B0D11))
+                            )
+                        )
+                )
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Column {
+                        Text(
+                            text = activeProgram.title.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.volt
+                        )
+                        Text(
+                            text = state.prefs.selectedDayTitle,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color(0xFFF8FAFC)
+                        )
+                    }
+                    StatusPill(
+                        text = "$doneSets / $totalSets SETS",
+                        color = palette.volt
+                    )
+                }
+            }
         }
 
         // Program Switcher Row (4 Flagship Programs)

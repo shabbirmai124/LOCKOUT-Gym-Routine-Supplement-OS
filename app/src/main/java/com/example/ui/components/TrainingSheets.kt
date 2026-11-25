@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,9 +20,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -54,8 +58,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -77,7 +83,7 @@ import com.example.ui.theme.ObsidianSurface1
 import com.example.ui.theme.TabularNumberStyle
 import kotlin.math.roundToInt
 
-// ==================== 1. VISUAL BARBELL PLATE LOADER ====================
+// ==================== 1. VISUAL BARBELL PLATE LOADER & WARM-UP RAMP ====================
 @Composable
 fun BarbellPlateLoaderDialog(
     exerciseName: String,
@@ -92,17 +98,69 @@ fun BarbellPlateLoaderDialog(
     val plan = remember(weight, barWeightKg) {
         LockoutDomainEngine.calculateBarbellPlates(weight, barWeightKg)
     }
+    val warmUpRamp = remember(weight, barWeightKg) {
+        LockoutDomainEngine.generateWarmUpRamp(weight, barWeightKg)
+    }
+    val perSideKg = ((plan.achievedWeightKg - barWeightKg) / 2f).coerceAtLeast(0f)
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(22.dp),
             color = palette.surface1,
             border = BorderStroke(1.dp, palette.border)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(18.dp)
+            ) {
                 Text("VISUAL BARBELL LOADER", style = MaterialTheme.typography.labelMedium, color = palette.volt)
                 Text(exerciseName, style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Real-World Studio Olympic Barbell & Competition Bumper Plates Hero
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(126.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF141820))
+                        .border(1.dp, palette.border, RoundedCornerShape(14.dp))
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.img_barbell_hero_1795606978506),
+                        contentDescription = stringResource(R.string.cd_barbell_hero),
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color(0x990B0D11), Color.Transparent, Color(0xCC0B0D11))
+                                )
+                            )
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xCC0B0D11),
+                        border = BorderStroke(1.dp, palette.volt.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 8.dp)
+                    ) {
+                        Text(
+                            text = "TARGET: ${LockoutDomainEngine.formatWeight(plan.achievedWeightKg, useLbs).uppercase()} (${LockoutDomainEngine.formatWeight(perSideKg, useLbs).uppercase()} / SIDE)",
+                            style = TabularNumberStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.ExtraBold),
+                            color = Color(0xFFF8FAFC),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Bar weight selector (20kg vs 15kg)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -119,7 +177,7 @@ fun BarbellPlateLoaderDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Target weight adjuster
                 Row(
@@ -133,7 +191,7 @@ fun BarbellPlateLoaderDialog(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = LockoutDomainEngine.formatWeight(plan.achievedWeightKg, useLbs),
-                            style = TabularNumberStyle.copy(fontSize = 28.sp),
+                            style = TabularNumberStyle.copy(fontSize = 26.sp, fontWeight = FontWeight.ExtraBold),
                             color = palette.volt
                         )
                         Text(
@@ -147,28 +205,32 @@ fun BarbellPlateLoaderDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Visual Barbell Sleeve Representation (One Side)
+                // Live Dynamic Barbell Sleeve Plate Breakdown (One Side)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(92.dp)
+                        .height(88.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(palette.canvas)
                         .border(1.dp, palette.border, RoundedCornerShape(14.dp))
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    // Barbell Shaft
+                    // Metallic Chrome Barbell Shaft
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(12.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF64748B))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFFE2E8F0), Color(0xFF94A3B8), Color(0xFF475569))
+                                )
+                            )
                     )
-                    // Collar
+                    // Collar & Calculated Competition Plates
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -176,9 +238,13 @@ fun BarbellPlateLoaderDialog(
                         Box(
                             modifier = Modifier
                                 .width(10.dp)
-                                .height(32.dp)
+                                .height(34.dp)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(Color(0xFFCBD5E1))
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color(0xFFF8FAFC), Color(0xFF94A3B8))
+                                    )
+                                )
                         )
                         if (plan.isBarOnly) {
                             Spacer(modifier = Modifier.width(12.dp))
@@ -196,27 +262,45 @@ fun BarbellPlateLoaderDialog(
                                     plate.weightKg >= 5f -> 46.dp
                                     else -> 36.dp
                                 }
-                                val plateWidth = if (plate.weightKg >= 15f) 22.dp else 18.dp
+                                val plateWidth = if (plate.weightKg >= 15f) 24.dp else 19.dp
+                                val baseColor = Color(plate.colorHex)
                                 Box(
                                     modifier = Modifier
                                         .width(plateWidth)
                                         .height(plateHeight)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(plate.colorHex)),
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(
+                                                    baseColor.copy(alpha = 0.95f),
+                                                    baseColor,
+                                                    baseColor.copy(alpha = 0.72f)
+                                                )
+                                            )
+                                        )
+                                        .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(4.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = plate.label,
-                                        style = TabularNumberStyle.copy(fontSize = 8.sp),
+                                        style = TabularNumberStyle.copy(fontSize = 8.sp, fontWeight = FontWeight.ExtraBold),
                                         color = if (plate.weightKg == 5f || plate.weightKg == 15f || plate.weightKg == 1.25f) Color.Black else Color.White
                                     )
                                 }
                             }
+                            // Volt Locking Collar
+                            Box(
+                                modifier = Modifier
+                                    .width(7.dp)
+                                    .height(26.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(palette.volt)
+                            )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Exact text breakdown per side
                 val groupedText = if (plan.isBarOnly) {
@@ -233,18 +317,72 @@ fun BarbellPlateLoaderDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.textSecondary
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = groupedText,
                     style = MaterialTheme.typography.titleSmall,
                     color = palette.textPrimary
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                // Integrated Warm-Up Ramp Progression (with Kinetic Volt accent rails)
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "WARM-UP RAMP PROGRESSION",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.volt
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(palette.surface2)
+                        .border(1.dp, palette.border, RoundedCornerShape(14.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    warmUpRamp.forEach { step ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(palette.volt)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (step.stepNumber == 1) "Bar Only" else "${step.percentage}%",
+                                        style = TabularNumberStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.ExtraBold),
+                                        color = palette.volt
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${LockoutDomainEngine.formatWeight(step.weightKg, useLbs)} × ${step.reps}",
+                                        style = TabularNumberStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                                        color = palette.textPrimary
+                                    )
+                                }
+                                Text(
+                                    text = "${step.purpose} • Rest ${step.restSeconds}s",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = palette.textSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = palette.volt)
+                    colors = ButtonDefaults.buttonColors(containerColor = palette.volt),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("LOCKED & LOADED", color = palette.onVolt, fontWeight = FontWeight.ExtraBold)
                 }

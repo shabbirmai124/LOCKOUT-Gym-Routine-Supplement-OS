@@ -28,6 +28,10 @@
     <string name="cd_clear_search">Clear search query</string>
     <string name="cd_gear_bag">Toggle item in My Gear Bag</string>
     <string name="cd_muscle_anatomy">Front anatomical human muscular system diagram showing muscle recovery status</string>
+    <string name="cd_barbell_hero">Olympic barbell loaded with competition bumper plates</string>
+    <string name="cd_training_hero">Knurled steel dumbbells and iron weight plates on gym floor</string>
+    <string name="cd_vault_hero">Powerlifting lever belt, knee sleeves, wrist wraps, collars, and lifting shoes</string>
+    <string name="cd_stack_hero">Supplement canisters, titanium shaker bottle, and daily capsules</string>
     <string name="cd_close">Close</string>
 
     <!-- Labels -->
