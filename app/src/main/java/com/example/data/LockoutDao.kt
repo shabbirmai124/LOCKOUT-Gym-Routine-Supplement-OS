@@ -26,7 +26,7 @@ interface LockoutDao {
     @Query("DELETE FROM exercises WHERE id = :id")
     suspend fun deleteExerciseById(id: Int)
 
-    // Supplements & Date-Stamped Logs (automatic midnight reset + streak tracking)
+    // Supplements & Date-Stamped Logs (automatic midnight reset + days-taken tracking)
     @Query("SELECT * FROM supplements ORDER BY id ASC")
     fun getAllSupplements(): Flow<List<SupplementEntity>>
 
@@ -56,6 +56,34 @@ interface LockoutDao {
 
     @Query("DELETE FROM supplement_logs WHERE supplementId = :id AND dateIso = :today")
     suspend fun unmarkSupplement(id: Int, today: String)
+
+    // Daily Healthy Body Habits & Date-Stamped Adherence Logs
+    @Query("SELECT * FROM daily_habits ORDER BY id ASC")
+    fun getAllHabits(): Flow<List<DailyHabitEntity>>
+
+    @Query("SELECT COUNT(*) FROM daily_habits")
+    suspend fun countHabits(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllHabits(habits: List<DailyHabitEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertHabit(habit: DailyHabitEntity)
+
+    @Query("DELETE FROM daily_habits WHERE id = :id")
+    suspend fun deleteHabitById(id: Int)
+
+    @Query("SELECT * FROM habit_logs WHERE dateIso = :today")
+    fun getHabitLogsForDate(today: String): Flow<List<HabitLogEntity>>
+
+    @Query("SELECT * FROM habit_logs ORDER BY dateIso DESC")
+    fun getAllHabitLogs(): Flow<List<HabitLogEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun markHabitCompleted(log: HabitLogEntity)
+
+    @Query("DELETE FROM habit_logs WHERE habitId = :id AND dateIso = :today")
+    suspend fun unmarkHabit(id: Int, today: String)
 
     // Daily Nutrition (keyed by today's ISO date)
     @Query("SELECT * FROM daily_nutrition WHERE dateIso = :today")
@@ -93,7 +121,7 @@ interface LockoutDao {
     @Query("UPDATE skill_milestones SET isUnlocked = :unlocked WHERE id = :id")
     suspend fun setSkillUnlocked(id: Int, unlocked: Boolean)
 
-    // App Preferences (Program, Day, Theme, Workout Hour, Joint Injury Flags)
+    // App Preferences (Program, Day, Theme, Workout Hour, Joint Injury Flags, Biometrics)
     @Query("SELECT * FROM app_prefs WHERE id = 1")
     fun getAppPrefs(): Flow<AppPrefsEntity?>
 

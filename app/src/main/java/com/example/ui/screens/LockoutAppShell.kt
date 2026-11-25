@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,13 +22,17 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Inventory2
@@ -46,6 +51,7 @@ import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -55,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,12 +75,22 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.ui.components.AddExerciseDialog
+import com.example.ui.components.AddHabitDialog
 import com.example.ui.components.AddSupplementDialog
+import com.example.ui.components.BiofeedbackDialog
+import com.example.ui.components.CalorieCalculatorDialog
+import com.example.ui.components.CoachingDirectiveBanner
+import com.example.ui.components.ConditioningBanner
+import com.example.ui.components.DataExportPreviewDialog
+import com.example.ui.components.EmergencyIceDialog
 import com.example.ui.components.IsometricHoldBanner
+import com.example.ui.components.LogCustomMealDialog
+import com.example.ui.components.PasteRoutineDialog
 import com.example.ui.components.RestTimerBanner
 import com.example.ui.components.SkillTreeDialog
 import com.example.ui.theme.LockoutColors
 import com.example.viewmodel.LockoutViewModel
+import kotlinx.coroutines.launch
 
 private data class NavDestination(
     val titleRes: Int,
@@ -83,10 +100,17 @@ private data class NavDestination(
 )
 
 private val Destinations = listOf(
-    NavDestination(R.string.nav_overview, Icons.Filled.Dashboard, Icons.Outlined.Dashboard, "nav_overview"),
-    NavDestination(R.string.nav_training, Icons.Filled.FitnessCenter, Icons.Outlined.FitnessCenter, "nav_training"),
+    NavDestination(R.string.nav_overview, Icons.Filled.Dashboard, Icons.Outlined.Dashboard, "nav_command"),
+    NavDestination(R.string.nav_training, Icons.Filled.FitnessCenter, Icons.Outlined.FitnessCenter, "nav_train"),
     NavDestination(R.string.nav_stack, Icons.Filled.Medication, Icons.Outlined.Medication, "nav_stack"),
-    NavDestination(R.string.nav_vault, Icons.Filled.Inventory2, Icons.Outlined.Inventory2, "nav_vault")
+    NavDestination(R.string.nav_vault, Icons.Filled.Inventory2, Icons.Outlined.Inventory2, "nav_vault"),
+    NavDestination(R.string.nav_labs, Icons.Filled.Analytics, Icons.Outlined.Analytics, "nav_labs")
+)
+
+private data class ExportPayload(
+    val title: String,
+    val body: String,
+    val mimeType: String
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,11 +119,19 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val palette = LockoutColors.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showSkillTree by remember { mutableStateOf(false) }
     var showAddExercise by remember { mutableStateOf(false) }
     var showAddSupplement by remember { mutableStateOf(false) }
+    var showBiofeedback by remember { mutableStateOf(false) }
+    var showPasteRoutine by remember { mutableStateOf(false) }
+    var showIceCard by remember { mutableStateOf(false) }
+    var showCalorieCalculator by remember { mutableStateOf(false) }
+    var showCustomMeal by remember { mutableStateOf(false) }
+    var showAddHabit by remember { mutableStateOf(false) }
+    var exportPreview by remember { mutableStateOf<ExportPayload?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.snackbarEvents.collect { message ->
@@ -107,7 +139,6 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
         }
     }
 
-    // Back press from secondary tabs returns smoothly to Overview
     BackHandler(enabled = selectedTab != 0) {
         selectedTab = 0
     }
@@ -131,27 +162,59 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                                 imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
                                 tint = palette.volt,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Column {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 2.sp
+                                ),
+                                color = palette.textPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // Instant KG / LBS Unit Fluidity Pill
+                            Surface(
+                                onClick = { viewModel.toggleWeightUnit() },
+                                shape = RoundedCornerShape(8.dp),
+                                color = palette.surface2,
+                                border = BorderStroke(1.dp, palette.volt.copy(alpha = 0.5f)),
+                                modifier = Modifier.testTag("unit_toggle_chip")
+                            ) {
                                 Text(
-                                    text = stringResource(R.string.app_name),
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        letterSpacing = 2.5.sp
-                                    ),
-                                    color = palette.textPrimary
-                                )
-                                Text(
-                                    text = stringResource(R.string.app_subtitle),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                    color = palette.textSecondary
+                                    text = if (state.prefs.useLbs) "LBS" else "KG",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = palette.volt,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
                         }
                     },
                     actions = {
+                        // RP Biofeedback / Deload Check
+                        IconButton(
+                            onClick = { showBiofeedback = true },
+                            modifier = Modifier.testTag("biofeedback_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = stringResource(R.string.cd_biofeedback),
+                                tint = palette.cyan
+                            )
+                        }
+                        // Emergency ICE Medical Safety Card
+                        IconButton(
+                            onClick = { showIceCard = true },
+                            modifier = Modifier.testTag("ice_card_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MedicalServices,
+                                contentDescription = stringResource(R.string.cd_ice_card),
+                                tint = if (state.prefs.iceContactPhone.isNotBlank()) palette.crimson else palette.textSecondary
+                            )
+                        }
+                        // Obsidian Dark / Titanium Daylight Toggle
                         IconButton(
                             onClick = { viewModel.toggleDaylightMode() },
                             modifier = Modifier.testTag("toggle_daylight_mode_btn")
@@ -186,7 +249,12 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                                         contentDescription = stringResource(dest.titleRes)
                                     )
                                 },
-                                label = { Text(stringResource(dest.titleRes)) },
+                                label = {
+                                    Text(
+                                        text = stringResource(dest.titleRes),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp)
+                                    )
+                                },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = palette.onVolt,
                                     selectedTextColor = palette.volt,
@@ -277,7 +345,6 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
                     ) {
-                        // Live Timestamp Rest Timer Banner (stays visible across tabs)
                         RestTimerBanner(
                             visible = state.timerState.isRestRunning,
                             secondsLeft = state.timerState.restSecondsRemaining,
@@ -287,10 +354,9 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                             onStop = { viewModel.stopRestTimer() }
                         )
                         if (state.timerState.isRestRunning) {
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
 
-                        // Live Isometric Hold Timer Banner (3-2-1 Audio Cue + Stopwatch)
                         IsometricHoldBanner(
                             visible = state.timerState.isHoldRunning,
                             exerciseName = state.timerState.holdExerciseName,
@@ -298,19 +364,46 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                             onStop = { viewModel.stopIsometricHoldTimer() }
                         )
                         if (state.timerState.isHoldRunning) {
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        ConditioningBanner(
+                            visible = state.timerState.isConditioningRunning,
+                            tick = state.timerState.conditioningTick,
+                            amrapRounds = state.timerState.amrapRoundsCompleted,
+                            onAddAmrapRound = { viewModel.incrementAmrapRound() },
+                            onStop = { viewModel.stopConditioning() }
+                        )
+                        if (state.timerState.isConditioningRunning) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        CoachingDirectiveBanner(
+                            directive = state.activeCoachingDirective,
+                            onDismiss = { viewModel.dismissCoachingDirective() }
+                        )
+                        if (state.activeCoachingDirective != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
 
                         Box(modifier = Modifier.weight(1f)) {
                             when (selectedTab) {
                                 0 -> DashboardScreen(
                                     state = state,
+                                    onSelectGymProfile = { viewModel.selectGymProfile(it) },
                                     onAddWater = { viewModel.addWater(it) },
                                     onLogQuickMeal = { name, p, c, f, kcal ->
                                         viewModel.logQuickMeal(name, p, c, f, kcal)
                                     },
                                     onSelectGoal = { viewModel.setNutritionGoal(it) },
                                     onToggleCarbCycle = { viewModel.toggleTrainingDayCarbCycle() },
+                                    onOpenCalorieCalculator = { showCalorieCalculator = true },
+                                    onOpenCustomMeal = { showCustomMeal = true },
+                                    onToggleHabit = { viewModel.toggleHabit(it) },
+                                    onOpenAddHabit = { showAddHabit = true },
+                                    onUpdateMuscleStatus = { muscle, status ->
+                                        viewModel.setMuscleRecoveryOverride(muscle, status)
+                                    },
                                     onOpenTraining = { selectedTab = 1 },
                                     onOpenStack = { selectedTab = 2 }
                                 )
@@ -323,16 +416,22 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                                     onCycleSetType = { viewModel.cycleSetType(it) },
                                     onSubmitRpe = { ex, rpe -> viewModel.submitRpeCheckIn(ex, rpe) },
                                     onApplySwap = { ex, alt -> viewModel.applySmartSwap(ex, alt) },
+                                    onAdaptDayToProfile = { viewModel.adaptActiveDayToProfile(it) },
                                     onStartHoldTimer = { viewModel.startIsometricHoldTimer(it) },
                                     onStartCustomRest = { secs, name -> viewModel.startRestTimer(secs, name) },
                                     onSetBarbellWeight = { viewModel.setBarbellWeight(it) },
                                     onToggleJointFlag = { viewModel.toggleJointFlag(it) },
                                     onOpenSkillTree = { showSkillTree = true },
+                                    onOpenPasteImporter = { showPasteRoutine = true },
                                     onResetDaySets = { viewModel.resetDaySets() }
                                 )
                                 2 -> SupplementScreen(
                                     state = state,
                                     onToggleSupplement = { viewModel.toggleSupplement(it) },
+                                    onUpdateAlarm = { item, enabled, h, m ->
+                                        viewModel.updateSupplementAlarm(item, enabled, h, m)
+                                    },
+                                    onTestAlarm = { viewModel.testSupplementAlarm(it) },
                                     onRestockSupplement = { viewModel.restockSupplement(it) },
                                     onImportGoalStack = { id, label -> viewModel.importGoalStack(id, label) },
                                     onSetWorkoutHour = { viewModel.setPlannedWorkoutHour(it) }
@@ -341,6 +440,30 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                                     state = state,
                                     onToggleGearBag = { viewModel.toggleGearBagItem(it) },
                                     onAddSupplementToStack = { viewModel.importVaultSupplementToStack(it) }
+                                )
+                                4 -> PerformanceLabsScreen(
+                                    state = state,
+                                    onStartConditioning = { viewModel.startConditioning(it) },
+                                    onStopConditioning = { viewModel.stopConditioning() },
+                                    onUpdateAthleteProfile = { male, age, bw ->
+                                        viewModel.updateAthleteProfile(male, age, bw)
+                                    },
+                                    onOpenBiofeedback = { showBiofeedback = true },
+                                    onOpenPasteImporter = { showPasteRoutine = true },
+                                    onExportCsv = {
+                                        exportPreview = ExportPayload(
+                                            title = "Workout History (CSV)",
+                                            body = viewModel.buildCsvExport(),
+                                            mimeType = "text/csv"
+                                        )
+                                    },
+                                    onExportJson = {
+                                        exportPreview = ExportPayload(
+                                            title = "Full LOCKOUT Backup (JSON)",
+                                            body = viewModel.buildJsonExport(),
+                                            mimeType = "application/json"
+                                        )
+                                    }
                                 )
                             }
                         }
@@ -373,6 +496,72 @@ fun LockoutAppShell(viewModel: LockoutViewModel) {
                 viewModel.addCustomSupplement(name, dosage, timing, servings)
             },
             onDismiss = { showAddSupplement = false }
+        )
+    }
+
+    if (showBiofeedback) {
+        BiofeedbackDialog(
+            onSubmit = { viewModel.submitBiofeedback(it) },
+            onDismiss = { showBiofeedback = false }
+        )
+    }
+
+    if (showPasteRoutine) {
+        PasteRoutineDialog(
+            targetDayTitle = state.prefs.selectedDayTitle,
+            onImportText = { viewModel.importPastedRoutine(it) },
+            onDismiss = { showPasteRoutine = false }
+        )
+    }
+
+    if (showIceCard) {
+        EmergencyIceDialog(
+            prefs = state.prefs,
+            onSave = { name, phone, blood, allergies ->
+                viewModel.updateIceCard(name, phone, blood, allergies)
+            },
+            onDismiss = { showIceCard = false }
+        )
+    }
+
+    if (showCalorieCalculator) {
+        CalorieCalculatorDialog(
+            prefs = state.prefs,
+            nutrition = state.nutrition,
+            onApplyPlan = { weight, height, age, male, activity, goal ->
+                viewModel.applyCalorieCalculatorPlan(weight, height, age, male, activity, goal)
+            },
+            onDismiss = { showCalorieCalculator = false }
+        )
+    }
+
+    if (showCustomMeal) {
+        LogCustomMealDialog(
+            onLogMeal = { name, p, c, f, kcal ->
+                viewModel.logQuickMeal(name, p, c, f, kcal)
+            },
+            onDismiss = { showCustomMeal = false }
+        )
+    }
+
+    if (showAddHabit) {
+        AddHabitDialog(
+            onAddHabit = { title, cat, target ->
+                viewModel.addCustomHabit(title, cat, target)
+            },
+            onDismiss = { showAddHabit = false }
+        )
+    }
+
+    exportPreview?.let { payload ->
+        DataExportPreviewDialog(
+            title = payload.title,
+            payload = payload.body,
+            mimeType = payload.mimeType,
+            onCopied = {
+                scope.launch { snackbarHostState.showSnackbar("Copied ${payload.title} to clipboard") }
+            },
+            onDismiss = { exportPreview = null }
         )
     }
 }

@@ -4,13 +4,17 @@
     <string name="app_tagline">Finish Every Rep. Master Every Metric.</string>
 
     <!-- Navigation -->
-    <string name="nav_overview">Overview</string>
-    <string name="nav_training">Training</string>
+    <string name="nav_overview">Command</string>
+    <string name="nav_training">Train</string>
     <string name="nav_stack">Stack</string>
     <string name="nav_vault">Vault</string>
+    <string name="nav_labs">Labs</string>
 
     <!-- Actions & Accessibility -->
     <string name="cd_toggle_theme">Toggle Obsidian Dark and Titanium Daylight mode</string>
+    <string name="cd_toggle_units">Toggle weight units between KG and LBS</string>
+    <string name="cd_ice_card">Open Emergency ICE Safety Card</string>
+    <string name="cd_biofeedback">Open Mesocycle Biofeedback and Deload Check</string>
     <string name="cd_skill_tree">Open Gymnastic Skill Tree</string>
     <string name="cd_injury_guard">Flag joint tightness or injury guardrails</string>
     <string name="cd_plate_calculator">Open Visual Barbell Plate Loader</string>
@@ -23,6 +27,7 @@
     <string name="cd_search_vault">Search Gym Vault</string>
     <string name="cd_clear_search">Clear search query</string>
     <string name="cd_gear_bag">Toggle item in My Gear Bag</string>
+    <string name="cd_muscle_anatomy">Front anatomical human muscular system diagram showing muscle recovery status</string>
     <string name="cd_close">Close</string>
 
     <!-- Labels -->

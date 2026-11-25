@@ -24,11 +24,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backpack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -60,11 +63,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.ExerciseEntity
+import com.example.data.GymProfile
 import com.example.data.LockoutSeedData
 import com.example.domain.LockoutDomainEngine
 import com.example.domain.SwapAlternative
 import com.example.ui.components.BarbellPlateLoaderDialog
 import com.example.ui.components.InjuryGuardDialog
+import com.example.ui.components.MobilityFlowDialog
 import com.example.ui.components.ObsidianCard
 import com.example.ui.components.PrShareCardDialog
 import com.example.ui.components.RpeOverloadDialog
@@ -86,15 +91,19 @@ fun TrainingScreen(
     onCycleSetType: (ExerciseEntity) -> Unit,
     onSubmitRpe: (ExerciseEntity, Float) -> Unit,
     onApplySwap: (ExerciseEntity, SwapAlternative) -> Unit,
+    onAdaptDayToProfile: (GymProfile) -> Unit,
     onStartHoldTimer: (ExerciseEntity) -> Unit,
     onStartCustomRest: (Int, String) -> Unit,
     onSetBarbellWeight: (Float) -> Unit,
     onToggleJointFlag: (String) -> Unit,
     onOpenSkillTree: () -> Unit,
+    onOpenPasteImporter: () -> Unit,
     onResetDaySets: () -> Unit
 ) {
     val palette = LockoutColors.current
     val haptics = LocalHapticFeedback.current
+    val useLbs = state.prefs.useLbs
+    val activeProfile = state.prefs.gymProfile
     val activeProgram = LockoutSeedData.programs.firstOrNull { it.id == state.prefs.selectedProgramId }
         ?: LockoutSeedData.programs.first()
 
@@ -104,6 +113,7 @@ fun TrainingScreen(
     var rpeExercise by remember { mutableStateOf<ExerciseEntity?>(null) }
     var prExercise by remember { mutableStateOf<ExerciseEntity?>(null) }
     var showInjuryDialog by remember { mutableStateOf(false) }
+    var showMobilityDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -112,10 +122,10 @@ fun TrainingScreen(
     ) {
         item {
             SectionHeader(
-                eyebrow = "${activeProgram.daysPerWeek} • ${activeProgram.subtitle}",
+                eyebrow = "${activeProfile.shortLabel.uppercase()} • ${activeProgram.daysPerWeek}",
                 title = stringResource(R.string.label_training_routine),
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         IconButton(
                             onClick = { showInjuryDialog = true },
                             modifier = Modifier.testTag("injury_guard_btn")
@@ -164,12 +174,7 @@ fun TrainingScreen(
                     FilterChip(
                         selected = selected,
                         onClick = { onSelectProgram(prog.id) },
-                        label = {
-                            Text(
-                                text = prog.title,
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        },
+                        label = { Text(prog.title, style = MaterialTheme.typography.labelLarge) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = palette.volt,
                             selectedLabelColor = palette.onVolt
@@ -180,7 +185,7 @@ fun TrainingScreen(
             }
         }
 
-        // Day Selector Row
+        // Day Selector Row + Quick Mobility & Paste Importer Chips
         item {
             Row(
                 modifier = Modifier
@@ -194,10 +199,7 @@ fun TrainingScreen(
                         onClick = { onSelectDay(day) },
                         shape = RoundedCornerShape(10.dp),
                         color = if (selected) palette.surface2 else palette.canvas,
-                        border = BorderStroke(
-                            1.dp,
-                            if (selected) palette.volt else palette.border
-                        ),
+                        border = BorderStroke(1.dp, if (selected) palette.volt else palette.border),
                         modifier = Modifier.testTag("day_chip_$day")
                     ) {
                         Text(
@@ -207,6 +209,40 @@ fun TrainingScreen(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         )
                     }
+                }
+            }
+        }
+
+        // Pre-Lift Mobility + Paste-to-Routine + Non-Commercial Profile Auto-Adapter
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                UtilityChip(
+                    icon = Icons.Default.SelfImprovement,
+                    label = "5-Min Mobility Flow",
+                    tag = "open_mobility_flow_btn",
+                    accent = palette.cyan,
+                    onClick = { showMobilityDialog = true }
+                )
+                UtilityChip(
+                    icon = Icons.Default.ContentPaste,
+                    label = "Paste Routine",
+                    tag = "train_paste_routine_btn",
+                    accent = palette.volt,
+                    onClick = onOpenPasteImporter
+                )
+                if (activeProfile != GymProfile.COMMERCIAL) {
+                    UtilityChip(
+                        icon = Icons.Default.AutoFixHigh,
+                        label = "Adapt to ${activeProfile.shortLabel}",
+                        tag = "adapt_profile_btn",
+                        accent = palette.amber,
+                        onClick = { onAdaptDayToProfile(activeProfile) }
+                    )
                 }
             }
         }
@@ -305,7 +341,7 @@ fun TrainingScreen(
                         Spacer(modifier = Modifier.height(2.dp))
 
                         val ghostText = if (ex.previousWeightKg > 0f && !ex.isIsometric) {
-                            " • Last: ${LockoutDomainEngine.formatKg(ex.previousWeightKg)}"
+                            " • Last: ${LockoutDomainEngine.formatWeight(ex.previousWeightKg, useLbs)}"
                         } else ""
                         Text(
                             text = "${ex.targetSets} sets × ${ex.targetRepsOrSec} • Rest ${ex.restSeconds}s$ghostText",
@@ -318,7 +354,7 @@ fun TrainingScreen(
                         Column(horizontalAlignment = Alignment.End) {
                             Text("EST 1RM", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = palette.textSecondary)
                             Text(
-                                text = LockoutDomainEngine.formatKg(est1Rm),
+                                text = LockoutDomainEngine.formatWeight(est1Rm, useLbs),
                                 style = TabularNumberStyle.copy(fontSize = 13.sp),
                                 color = palette.cyan
                             )
@@ -326,7 +362,6 @@ fun TrainingScreen(
                     }
                 }
 
-                // Joint Risk Warning inside Card
                 if (jointWarning != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
@@ -347,7 +382,6 @@ fun TrainingScreen(
                     }
                 }
 
-                // Coaching Cue
                 if (ex.coachingCue.isNotBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -357,7 +391,6 @@ fun TrainingScreen(
                     )
                 }
 
-                // Smart Gear Bag Cue
                 if (recommendedGearList.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
@@ -413,7 +446,6 @@ fun TrainingScreen(
                             }
                         }
                     } else {
-                        // Quick -2.5 / Weight / +2.5 control (sweaty-thumb friendly)
                         Row(
                             modifier = Modifier
                                 .weight(1f)
@@ -443,7 +475,7 @@ fun TrainingScreen(
                                 }
                             ) {
                                 Text(
-                                    text = if (ex.weightKg > 0f) LockoutDomainEngine.formatKg(ex.weightKg) else "BODYWEIGHT",
+                                    text = if (ex.weightKg > 0f) LockoutDomainEngine.formatWeight(ex.weightKg, useLbs) else "BODYWEIGHT",
                                     style = TabularNumberStyle.copy(fontSize = 15.sp),
                                     color = palette.textPrimary
                                 )
@@ -466,7 +498,6 @@ fun TrainingScreen(
                         }
                     }
 
-                    // 1-TAP COMPLETE SET PRIMARY BUTTON (54.dp tall for gym floor!)
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -496,7 +527,6 @@ fun TrainingScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Utility Action Strip: Swap, Plate Loader, Warm-Up Ramp, RPE Overload, PR Share Card
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -542,12 +572,12 @@ fun TrainingScreen(
         }
     }
 
-    // Interactive Gym-Floor Dialogs
     plateLoaderExercise?.let { ex ->
         BarbellPlateLoaderDialog(
             exerciseName = ex.name,
             initialWeightKg = ex.weightKg,
             barWeightKg = state.prefs.barbellWeightKg,
+            useLbs = useLbs,
             onSelectBarWeight = onSetBarbellWeight,
             onDismiss = { plateLoaderExercise = null }
         )
@@ -556,6 +586,8 @@ fun TrainingScreen(
     swapExercise?.let { ex ->
         SmartSwapDialog(
             exercise = ex,
+            gymProfile = activeProfile,
+            useLbs = useLbs,
             onSelectSwap = { alt ->
                 onApplySwap(ex, alt)
                 swapExercise = null
@@ -568,6 +600,7 @@ fun TrainingScreen(
         WarmUpRampDialog(
             exercise = ex,
             barWeightKg = state.prefs.barbellWeightKg,
+            useLbs = useLbs,
             onStartWarmUpRest = { secs -> onStartCustomRest(secs, "${ex.name} Warm-Up") },
             onDismiss = { warmUpExercise = null }
         )
@@ -598,6 +631,14 @@ fun TrainingScreen(
             onDismiss = { showInjuryDialog = false }
         )
     }
+
+    if (showMobilityDialog) {
+        MobilityFlowDialog(
+            dayTitle = state.prefs.selectedDayTitle,
+            onStartDrillTimer = onStartCustomRest,
+            onDismiss = { showMobilityDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -605,21 +646,23 @@ private fun UtilityChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     tag: String,
+    accent: androidx.compose.ui.graphics.Color? = null,
     onClick: () -> Unit
 ) {
     val palette = LockoutColors.current
+    val tint = accent ?: palette.textSecondary
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(palette.canvas)
-            .border(1.dp, palette.border, RoundedCornerShape(10.dp))
+            .border(1.dp, (accent ?: palette.border).copy(alpha = if (accent != null) 0.55f else 1f), RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 7.dp)
             .testTag(tag),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = palette.textSecondary, modifier = Modifier.size(14.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(5.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = palette.textPrimary)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = accent ?: palette.textPrimary)
     }
 }

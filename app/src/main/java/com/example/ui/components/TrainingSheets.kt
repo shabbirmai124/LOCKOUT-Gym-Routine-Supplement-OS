@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.R
 import com.example.data.ExerciseEntity
+import com.example.data.GymProfile
 import com.example.data.MuscleGroup
 import com.example.data.SkillMilestoneEntity
 import com.example.data.SupplementTiming
@@ -82,6 +83,7 @@ fun BarbellPlateLoaderDialog(
     exerciseName: String,
     initialWeightKg: Float,
     barWeightKg: Float,
+    useLbs: Boolean = false,
     onSelectBarWeight: (Float) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -130,7 +132,7 @@ fun BarbellPlateLoaderDialog(
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = LockoutDomainEngine.formatKg(plan.achievedWeightKg),
+                            text = LockoutDomainEngine.formatWeight(plan.achievedWeightKg, useLbs),
                             style = TabularNumberStyle.copy(fontSize = 28.sp),
                             color = palette.volt
                         )
@@ -255,12 +257,14 @@ fun BarbellPlateLoaderDialog(
 @Composable
 fun SmartSwapDialog(
     exercise: ExerciseEntity,
+    gymProfile: GymProfile = GymProfile.COMMERCIAL,
+    useLbs: Boolean = false,
     onSelectSwap: (SwapAlternative) -> Unit,
     onDismiss: () -> Unit
 ) {
     val palette = LockoutColors.current
-    val alternatives = remember(exercise.id, exercise.name, exercise.weightKg) {
-        LockoutDomainEngine.getSmartSwapAlternatives(exercise)
+    val alternatives = remember(exercise.id, exercise.name, exercise.weightKg, gymProfile) {
+        LockoutDomainEngine.getSmartSwapAlternatives(exercise, gymProfile)
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -273,11 +277,11 @@ fun SmartSwapDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = palette.volt)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("1-TAP MACHINE SWAPPER", style = MaterialTheme.typography.labelMedium, color = palette.volt)
+                    Text("SWAP (${gymProfile.shortLabel.uppercase()})", style = MaterialTheme.typography.labelMedium, color = palette.volt)
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Bench or machine taken? Swap ${exercise.name} with auto-converted working weight.",
+                    text = "Matched to ${gymProfile.label}. Tap to swap ${exercise.name} with auto-converted working weight.",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.textSecondary
                 )
@@ -304,7 +308,7 @@ fun SmartSwapDialog(
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 StatusPill(
-                                    text = if (alt.convertedWeightKg > 0f) LockoutDomainEngine.formatKg(alt.convertedWeightKg) else "BW",
+                                    text = LockoutDomainEngine.formatWeight(alt.convertedWeightKg, useLbs),
                                     color = palette.volt
                                 )
                             }
@@ -326,6 +330,7 @@ fun SmartSwapDialog(
 fun WarmUpRampDialog(
     exercise: ExerciseEntity,
     barWeightKg: Float,
+    useLbs: Boolean = false,
     onStartWarmUpRest: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -344,7 +349,7 @@ fun WarmUpRampDialog(
                 Text("AUTO WARM-UP RAMP", style = MaterialTheme.typography.labelMedium, color = palette.amber)
                 Text(exercise.name, style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
                 Text(
-                    text = "Working target: ${LockoutDomainEngine.formatKg(exercise.weightKg)}",
+                    text = "Working target: ${LockoutDomainEngine.formatWeight(exercise.weightKg, useLbs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.textSecondary
                 )
@@ -375,7 +380,7 @@ fun WarmUpRampDialog(
                                         color = palette.amber
                                     )
                                     Text(
-                                        text = "${LockoutDomainEngine.formatKg(set.weightKg)} × ${set.reps} reps",
+                                        text = "${LockoutDomainEngine.formatWeight(set.weightKg, useLbs)} × ${set.reps} reps",
                                         style = TabularNumberStyle.copy(fontSize = 17.sp),
                                         color = palette.textPrimary
                                     )

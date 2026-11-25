@@ -631,6 +631,51 @@ object LockoutSeedData {
         else -> seedSupplements() // "hypertrophy"
     }
 
+    fun seedHealthyHabits(): List<DailyHabitEntity> = listOf(
+        DailyHabitEntity(
+            title = "7.5h+ Deep Sleep",
+            category = "Recovery",
+            targetLabel = "Hormonal & CNS restoration",
+            iconKey = "SLEEP"
+        ),
+        DailyHabitEntity(
+            title = "10,000 Daily Steps",
+            category = "Cardio • NEAT",
+            targetLabel = "Metabolic health & fat oxidation",
+            iconKey = "STEPS"
+        ),
+        DailyHabitEntity(
+            title = "10m Morning Sunlight",
+            category = "Circadian",
+            targetLabel = "Cortisol & sleep-wake anchor",
+            iconKey = "SUN"
+        ),
+        DailyHabitEntity(
+            title = "15m Mobility & Posture",
+            category = "Joint Longevity",
+            targetLabel = "Thoracic, hips & shoulder capsule",
+            iconKey = "MOBILITY"
+        ),
+        DailyHabitEntity(
+            title = "Whole-Food Clean Fuel",
+            category = "Nutrition",
+            targetLabel = "Zero ultra-processed sugar",
+            iconKey = "NUTRITION"
+        ),
+        DailyHabitEntity(
+            title = "3L+ Water & Electrolytes",
+            category = "Hydration",
+            targetLabel = "Cellular volume & performance",
+            iconKey = "WATER"
+        ),
+        DailyHabitEntity(
+            title = "5m Breathwork / Stress Reset",
+            category = "Nervous System",
+            targetLabel = "Down-regulate sympathetic tone",
+            iconKey = "MIND"
+        )
+    )
+
     fun seedSkillMilestones(): List<SkillMilestoneEntity> = listOf(
         // Handstand Tree
         SkillMilestoneEntity(treeName = "Handstand", stepOrder = 1, title = "Wall Handstand", requirement = "60s belly-to-wall hold", isUnlocked = true),

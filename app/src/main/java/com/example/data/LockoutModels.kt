@@ -28,14 +28,57 @@ object DateUtils {
         cal.add(Calendar.DAY_OF_YEAR, -daysAgo)
         return isoFormat.format(cal.time)
     }
+
+    fun formatTime12h(hour24: Int, minute: Int): String {
+        val h = hour24.coerceIn(0, 23)
+        val m = minute.coerceIn(0, 59)
+        val period = if (h >= 12) "PM" else "AM"
+        val displayHour = when {
+            h == 0 -> 12
+            h > 12 -> h - 12
+            else -> h
+        }
+        return "%d:%02d %s".format(Locale.US, displayHour, m, period)
+    }
 }
 
-enum class SupplementTiming(val label: String, val defaultWindowHint: String) {
-    MORNING("Upon Waking", "7:00 AM • With Breakfast"),
-    PRE_WORKOUT("Pre-Workout", "30 mins Pre-Session"),
-    INTRA_WORKOUT("Intra-Workout", "During Training"),
-    POST_WORKOUT("Post-Workout", "Within 45 mins Post"),
-    NIGHT("Before Sleep", "45 mins Pre-Bed")
+enum class GymProfile(val label: String, val shortLabel: String) {
+    COMMERCIAL("Commercial Gym", "Commercial"),
+    HOME_GARAGE("Home Barbell + DB", "Home Garage"),
+    CALISTHENICS("Rings & Park", "Calisthenics"),
+    HOTEL("Hotel Dumbbells", "Hotel Travel")
+}
+
+enum class ConditioningMode(val label: String, val subtitle: String) {
+    EMOM("EMOM", "Every Minute on the Minute • 10 Rounds"),
+    TABATA("Tabata 20/10", "8 Rounds • 20s Max Effort / 10s Rest"),
+    AMRAP("AMRAP", "12-Min Countdown • Max Clean Rounds"),
+    ZONE2("Zone 2 HR", "30-Min Aerobic Base • 60–70% Max HR")
+}
+
+enum class ActivityLevel(
+    val label: String,
+    val detail: String,
+    val multiplier: Float
+) {
+    SEDENTARY("Sedentary", "Desk work • Minimal exercise", 1.2f),
+    LIGHT("Lightly Active", "1–3 sessions / week", 1.375f),
+    MODERATE("Moderate", "4–5 hard sessions / week", 1.55f),
+    VERY_ACTIVE("Very Active", "6–7 intense sessions / week", 1.725f),
+    PRO_ATHLETE("Athlete 2×", "Double sessions or physical labor", 1.9f)
+}
+
+enum class SupplementTiming(
+    val label: String,
+    val defaultWindowHint: String,
+    val defaultAlarmHour: Int,
+    val defaultAlarmMinute: Int
+) {
+    MORNING("Upon Waking", "7:30 AM • With Breakfast", 7, 30),
+    PRE_WORKOUT("Pre-Workout", "30 mins Pre-Session", 17, 30),
+    INTRA_WORKOUT("Intra-Workout", "During Training", 18, 15),
+    POST_WORKOUT("Post-Workout", "Within 45 mins Post", 19, 15),
+    NIGHT("Before Sleep", "45 mins Pre-Bed", 22, 0)
 }
 
 enum class VaultCategory(val title: String, val shortLabel: String) {
@@ -106,10 +149,12 @@ data class SupplementEntity(
     val servingsLeft: Int = 30,
     val tier: String = "Tier A",
     val cycleNote: String = "",
-    val interactionKey: String = "" // e.g. "CREATINE", "CAFFEINE", "VIT_D3", "OMEGA3", "ZINC", "CALCIUM", "IRON", "MAGNESIUM"
+    val interactionKey: String = "",
+    val reminderEnabled: Boolean = false,
+    val reminderHour: Int = timing.defaultAlarmHour,
+    val reminderMinute: Int = timing.defaultAlarmMinute
 )
 
-// Date-stamped log solves midnight reset & tracks 30-day streaks
 @Entity(
     tableName = "supplement_logs",
     primaryKeys = ["supplementId", "dateIso"]
@@ -118,6 +163,25 @@ data class SupplementLogEntity(
     val supplementId: Int,
     val dateIso: String = DateUtils.todayIso(),
     val takenAtMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "daily_habits")
+data class DailyHabitEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val category: String,
+    val targetLabel: String,
+    val iconKey: String = "WELLNESS"
+)
+
+@Entity(
+    tableName = "habit_logs",
+    primaryKeys = ["habitId", "dateIso"]
+)
+data class HabitLogEntity(
+    val habitId: Int,
+    val dateIso: String = DateUtils.todayIso(),
+    val completedAtMillis: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "daily_nutrition")
@@ -168,14 +232,39 @@ data class AppPrefsEntity(
     @PrimaryKey val id: Int = 1,
     val selectedProgramId: String = "ppl_6day",
     val selectedDayTitle: String = "Push Day",
+    val gymProfile: GymProfile = GymProfile.COMMERCIAL,
+    val useLbs: Boolean = false,
     val isDaylightMode: Boolean = false,
-    val plannedWorkoutHour: Int = 18, // 6:00 PM default for Caffeine Cutoff Guard
-    val flaggedJointsCsv: String = "", // e.g. "Left Shoulder,Lower Back"
+    val plannedWorkoutHour: Int = 18,
+    val flaggedJointsCsv: String = "",
+    val muscleOverrideCsv: String = "",
     val barbellWeightKg: Float = 20f,
-    val trainingStreakDays: Int = 6
+    val trainingStreakDays: Int = 6,
+    val athleteAge: Int = 26,
+    val athleteHeightCm: Int = 178,
+    val activityLevel: ActivityLevel = ActivityLevel.MODERATE,
+    val isMale: Boolean = true,
+    val iceContactName: String = "",
+    val iceContactPhone: String = "",
+    val iceBloodType: String = "O+",
+    val iceAllergies: String = "None"
 )
 
 class LockoutTypeConverters {
+    @TypeConverter
+    fun fromGymProfile(value: GymProfile): String = value.name
+
+    @TypeConverter
+    fun toGymProfile(value: String): GymProfile =
+        runCatching { GymProfile.valueOf(value) }.getOrDefault(GymProfile.COMMERCIAL)
+
+    @TypeConverter
+    fun fromActivityLevel(value: ActivityLevel): String = value.name
+
+    @TypeConverter
+    fun toActivityLevel(value: String): ActivityLevel =
+        runCatching { ActivityLevel.valueOf(value) }.getOrDefault(ActivityLevel.MODERATE)
+
     @TypeConverter
     fun fromTiming(value: SupplementTiming): String = value.name
 

@@ -11,15 +11,27 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.data.ConditioningMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 data class HoldTimerTick(
-    val countdownBeforeStart: Int, // 3, 2, 1, then 0 when active
+    val countdownBeforeStart: Int,
     val elapsedSeconds: Int,
     val targetSeconds: Int,
     val isComplete: Boolean
+)
+
+data class ConditioningTick(
+    val mode: ConditioningMode,
+    val phaseLabel: String, // "WORK", "REST", "MINUTE", "AMRAP", "ZONE 2"
+    val isWorkPhase: Boolean,
+    val currentRound: Int,
+    val totalRounds: Int,
+    val secondsRemainingInPhase: Int,
+    val totalSecondsRemaining: Int,
+    val isFinished: Boolean
 )
 
 class RestTimerEngine(private val context: Context) {
@@ -56,7 +68,6 @@ class RestTimerEngine(private val context: Context) {
             delay(150L)
         }
 
-        // Go cue!
         playMusicSafeChime(isFinal = true)
         vibrateSingleTap()
 
@@ -78,6 +89,85 @@ class RestTimerEngine(private val context: Context) {
                     isComplete = hitTarget
                 )
             )
+            delay(200L)
+        }
+    }
+
+    // Timestamp-based Conditioning Engine: EMOM, Tabata 20/10, AMRAP, Zone 2
+    fun startConditioning(mode: ConditioningMode): Flow<ConditioningTick> = flow {
+        val totalDurationSec = when (mode) {
+            ConditioningMode.EMOM -> 10 * 60   // 10 rounds x 60s
+            ConditioningMode.TABATA -> 8 * 30  // 8 rounds x (20s work + 10s rest)
+            ConditioningMode.AMRAP -> 12 * 60  // 12-min countdown
+            ConditioningMode.ZONE2 -> 30 * 60  // 30-min steady Zone 2
+        }
+        val totalRounds = when (mode) {
+            ConditioningMode.EMOM -> 10
+            ConditioningMode.TABATA -> 8
+            ConditioningMode.AMRAP -> 1
+            ConditioningMode.ZONE2 -> 1
+        }
+
+        val startMillis = System.currentTimeMillis()
+        val endMillis = startMillis + (totalDurationSec * 1000L)
+        var lastPhaseKey = ""
+
+        playMusicSafeChime(isFinal = true)
+        vibrateSingleTap()
+
+        while (true) {
+            val now = System.currentTimeMillis()
+            val totalRemainingMs = endMillis - now
+            if (totalRemainingMs <= 0L) {
+                emit(
+                    ConditioningTick(
+                        mode = mode,
+                        phaseLabel = "COMPLETE",
+                        isWorkPhase = false,
+                        currentRound = totalRounds,
+                        totalRounds = totalRounds,
+                        secondsRemainingInPhase = 0,
+                        totalSecondsRemaining = 0,
+                        isFinished = true
+                    )
+                )
+                playMusicSafeChime(isFinal = true)
+                vibrateDoublePulse()
+                break
+            }
+
+            val elapsedSec = ((now - startMillis) / 1000L).toInt()
+            val totalRemSec = ((totalRemainingMs + 999L) / 1000L).toInt()
+
+            val tick = when (mode) {
+                ConditioningMode.EMOM -> {
+                    val round = (elapsedSec / 60) + 1
+                    val secInMin = 60 - (elapsedSec % 60)
+                    ConditioningTick(mode, "MINUTE $round", true, round.coerceAtMost(totalRounds), totalRounds, secInMin, totalRemSec, false)
+                }
+                ConditioningMode.TABATA -> {
+                    val round = (elapsedSec / 30) + 1
+                    val secInBlock = elapsedSec % 30
+                    val isWork = secInBlock < 20
+                    val phaseRem = if (isWork) 20 - secInBlock else 30 - secInBlock
+                    ConditioningTick(mode, if (isWork) "MAX EFFORT" else "REST", isWork, round.coerceAtMost(totalRounds), totalRounds, phaseRem, totalRemSec, false)
+                }
+                ConditioningMode.AMRAP -> {
+                    ConditioningTick(mode, "AMRAP", true, 1, 1, totalRemSec, totalRemSec, false)
+                }
+                ConditioningMode.ZONE2 -> {
+                    ConditioningTick(mode, "ZONE 2 AEROBIC", true, 1, 1, totalRemSec, totalRemSec, false)
+                }
+            }
+
+            val phaseKey = "${tick.currentRound}_${tick.phaseLabel}"
+            if (lastPhaseKey.isNotEmpty() && phaseKey != lastPhaseKey) {
+                playMusicSafeChime(isFinal = tick.isWorkPhase)
+                vibrateSingleTap()
+            }
+            lastPhaseKey = phaseKey
+
+            emit(tick)
             delay(200L)
         }
     }

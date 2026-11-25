@@ -4,10 +4,15 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.ActivityLevel
 import com.example.data.AppPrefsEntity
+import com.example.data.ConditioningMode
+import com.example.data.DailyHabitEntity
 import com.example.data.DailyNutritionEntity
 import com.example.data.DateUtils
 import com.example.data.ExerciseEntity
+import com.example.data.GymProfile
+import com.example.data.HabitLogEntity
 import com.example.data.LockoutRepository
 import com.example.data.LockoutSeedData
 import com.example.data.MuscleGroup
@@ -15,14 +20,19 @@ import com.example.data.NutritionGoal
 import com.example.data.SetType
 import com.example.data.SkillMilestoneEntity
 import com.example.data.SupplementEntity
+import com.example.data.SupplementLogEntity
 import com.example.data.SupplementTiming
 import com.example.data.VaultItemEntity
+import com.example.domain.BiofeedbackReport
+import com.example.domain.CaloriePlanResult
 import com.example.domain.ClinicalGuardrail
 import com.example.domain.LockoutDomainEngine
 import com.example.domain.RecoveryStatus
 import com.example.domain.SwapAlternative
+import com.example.engine.ConditioningTick
 import com.example.engine.HoldTimerTick
 import com.example.engine.RestTimerEngine
+import com.example.engine.SupplementAlarmScheduler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +49,20 @@ data class SupplementDisplayItem(
     val entity: SupplementEntity,
     val isTakenToday: Boolean,
     val runOutDateLabel: String,
-    val isLowStock: Boolean
+    val isLowStock: Boolean,
+    val totalDaysTaken: Int = 0,
+    val streakDays: Int = 0,
+    val last7DaysTaken: List<Boolean> = List(7) { false },
+    val reminderTimeLabel: String = DateUtils.formatTime12h(entity.reminderHour, entity.reminderMinute)
+)
+
+@Immutable
+data class HabitDisplayItem(
+    val entity: DailyHabitEntity,
+    val isCompletedToday: Boolean,
+    val totalDaysCompleted: Int,
+    val streakDays: Int,
+    val last7DaysMask: List<Boolean>
 )
 
 @Immutable
@@ -50,7 +73,10 @@ data class TimerOverlayState(
     val isRestRunning: Boolean = false,
     val holdExerciseName: String = "",
     val holdTick: HoldTimerTick? = null,
-    val isHoldRunning: Boolean = false
+    val isHoldRunning: Boolean = false,
+    val conditioningTick: ConditioningTick? = null,
+    val isConditioningRunning: Boolean = false,
+    val amrapRoundsCompleted: Int = 0
 )
 
 @Immutable
@@ -60,30 +86,43 @@ data class LockoutUiState(
     val allExercises: List<ExerciseEntity> = emptyList(),
     val activeDayExercises: List<ExerciseEntity> = emptyList(),
     val supplements: List<SupplementDisplayItem> = emptyList(),
+    val habits: List<HabitDisplayItem> = emptyList(),
     val nutrition: DailyNutritionEntity = DailyNutritionEntity(),
+    val caloriePlan: CaloriePlanResult = LockoutDomainEngine.calculateCaloriePlan(
+        weightKg = 78.5f,
+        heightCm = 178,
+        ageYears = 26,
+        isMale = true,
+        activityLevel = ActivityLevel.MODERATE,
+        goal = NutritionGoal.LEAN_BULK
+    ),
     val effectiveWaterTargetMl: Int = 3500,
     val vaultItems: List<VaultItemEntity> = emptyList(),
     val ownedGearNames: Set<String> = emptySet(),
     val skillMilestones: List<SkillMilestoneEntity> = emptyList(),
     val clinicalGuardrails: List<ClinicalGuardrail> = emptyList(),
     val muscleRecovery: Map<MuscleGroup, RecoveryStatus> = emptyMap(),
-    val readinessScore: Int = 82,
+    val readinessScore: Int = 84,
     val creatineStreakDays: Int = 1,
     val flaggedJoints: Set<String> = emptySet(),
+    val activeCoachingDirective: String? = null,
     val timerState: TimerOverlayState = TimerOverlayState()
 )
 
 class LockoutViewModel(
     private val repository: LockoutRepository,
-    private val timerEngine: RestTimerEngine
+    private val timerEngine: RestTimerEngine,
+    private val alarmScheduler: SupplementAlarmScheduler
 ) : ViewModel() {
 
     private val _timerState = MutableStateFlow(TimerOverlayState())
-    private val _snackbarEvents = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    private val _coachingDirective = MutableStateFlow<String?>(null)
+    private val _snackbarEvents = MutableSharedFlow<String>(extraBufferCapacity = 6)
     val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
 
     private var restTimerJob: Job? = null
     private var holdTimerJob: Job? = null
+    private var conditioningJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -98,30 +137,76 @@ class LockoutViewModel(
         repository.allSupplementLogs,
         repository.todayNutrition()
     ) { exercises, supplements, todayLogs, allLogs, nutrition ->
-        CoreBundle(exercises, supplements, todayLogs.map { it.supplementId }.toSet(), allLogs.size, nutrition)
+        CoreBundle(
+            exercises = exercises,
+            supplements = supplements,
+            todayTakenIds = todayLogs.map { it.supplementId }.toSet(),
+            allSupplementLogs = allLogs,
+            nutrition = nutrition
+        )
+    }
+
+    private val habitsFlow = combine(
+        repository.allHabits,
+        repository.todayHabitLogs(),
+        repository.allHabitLogs
+    ) { habits, todayHabitLogs, allHabitLogs ->
+        HabitsBundle(
+            habits = habits,
+            todayHabitIds = todayHabitLogs.map { it.habitId }.toSet(),
+            allHabitLogs = allHabitLogs
+        )
     }
 
     private val metaDataFlow = combine(
         repository.allVaultItems,
         repository.allSkillMilestones,
         repository.appPrefs,
-        _timerState
-    ) { vaultItems, skills, prefs, timer ->
-        MetaBundle(vaultItems, skills, prefs, timer)
+        _timerState,
+        _coachingDirective
+    ) { vaultItems, skills, prefs, timer, directive ->
+        MetaBundle(vaultItems, skills, prefs, timer, directive)
     }
 
-    val uiState: StateFlow<LockoutUiState> = combine(coreDataFlow, metaDataFlow) { core, meta ->
+    val uiState: StateFlow<LockoutUiState> = combine(coreDataFlow, habitsFlow, metaDataFlow) { core, habitsBundle, meta ->
         val prefs = meta.prefs
+        val todayIso = DateUtils.todayIso()
         val activeDayExercises = core.exercises.filter {
             it.programId == prefs.selectedProgramId && it.dayTitle == prefs.selectedDayTitle
         }
 
+        val suppDatesById = core.allSupplementLogs
+            .groupBy { it.supplementId }
+            .mapValues { (_, list) -> list.map { it.dateIso }.toSet() }
+
         val suppItems = core.supplements.map { sup ->
+            val dates = suppDatesById[sup.id].orEmpty()
+            val stats = LockoutDomainEngine.computeAdherenceStats(dates, todayIso)
             SupplementDisplayItem(
                 entity = sup,
                 isTakenToday = sup.id in core.todayTakenIds,
                 runOutDateLabel = DateUtils.addDaysDisplay(sup.servingsLeft),
-                isLowStock = sup.servingsLeft <= 7
+                isLowStock = sup.servingsLeft <= 7,
+                totalDaysTaken = stats.totalDays,
+                streakDays = stats.currentStreakDays,
+                last7DaysTaken = stats.last7DaysMask,
+                reminderTimeLabel = DateUtils.formatTime12h(sup.reminderHour, sup.reminderMinute)
+            )
+        }
+
+        val habitDatesById = habitsBundle.allHabitLogs
+            .groupBy { it.habitId }
+            .mapValues { (_, list) -> list.map { it.dateIso }.toSet() }
+
+        val habitItems = habitsBundle.habits.map { habit ->
+            val dates = habitDatesById[habit.id].orEmpty()
+            val stats = LockoutDomainEngine.computeAdherenceStats(dates, todayIso)
+            HabitDisplayItem(
+                entity = habit,
+                isCompletedToday = habit.id in habitsBundle.todayHabitIds,
+                totalDaysCompleted = stats.totalDays,
+                streakDays = stats.currentStreakDays,
+                last7DaysMask = stats.last7DaysMask
             )
         }
 
@@ -135,14 +220,31 @@ class LockoutViewModel(
             supplements = core.supplements,
             plannedWorkoutHour = prefs.plannedWorkoutHour
         )
-        val recoveryMap = LockoutDomainEngine.calculateMuscleRecoveryMap(core.exercises)
+        val autoRecoveryMap = LockoutDomainEngine.calculateMuscleRecoveryMap(core.exercises)
+        val manualOverrides = LockoutDomainEngine.parseMuscleOverrides(prefs.muscleOverrideCsv)
+        val recoveryMap = LockoutDomainEngine.mergeMuscleRecovery(autoRecoveryMap, manualOverrides)
+
         val takenCount = suppItems.count { it.isTakenToday }
-        val readiness = LockoutDomainEngine.calculateReadinessScore(
+        val baseReadiness = LockoutDomainEngine.calculateReadinessScore(
             nutrition = core.nutrition,
             effectiveWaterTargetMl = effectiveWaterTarget,
             supplementsTaken = takenCount,
             totalSupplements = suppItems.size,
             recoveryMap = recoveryMap
+        )
+        val habitBonus = if (habitItems.isNotEmpty()) {
+            val ratio = habitItems.count { it.isCompletedToday }.toFloat() / habitItems.size
+            (ratio * 6f).toInt()
+        } else 0
+        val readiness = (baseReadiness + habitBonus).coerceIn(40, 100)
+
+        val caloriePlan = LockoutDomainEngine.calculateCaloriePlan(
+            weightKg = core.nutrition.bodyWeightKg,
+            heightCm = prefs.athleteHeightCm,
+            ageYears = prefs.athleteAge,
+            isMale = prefs.isMale,
+            activityLevel = prefs.activityLevel,
+            goal = core.nutrition.goal
         )
 
         val ownedGear = meta.vaultItems
@@ -156,9 +258,10 @@ class LockoutViewModel(
             .filter { it.isNotEmpty() }
             .toSet()
 
-        val creatineTakenToday = suppItems.any {
-            it.isTakenToday && (it.entity.interactionKey == "CREATINE" || it.entity.name.contains("Creatine", true))
+        val creatineItem = suppItems.firstOrNull {
+            it.entity.interactionKey == "CREATINE" || it.entity.name.contains("Creatine", true)
         }
+        val creatineStreak = (creatineItem?.streakDays ?: 0).coerceAtLeast(if (creatineItem?.isTakenToday == true) 1 else 0)
 
         LockoutUiState(
             isLoaded = true,
@@ -166,7 +269,9 @@ class LockoutViewModel(
             allExercises = core.exercises,
             activeDayExercises = activeDayExercises,
             supplements = suppItems,
+            habits = habitItems,
             nutrition = core.nutrition,
+            caloriePlan = caloriePlan,
             effectiveWaterTargetMl = effectiveWaterTarget,
             vaultItems = meta.vaultItems,
             ownedGearNames = ownedGear,
@@ -174,8 +279,9 @@ class LockoutViewModel(
             clinicalGuardrails = guardrails,
             muscleRecovery = recoveryMap,
             readinessScore = readiness,
-            creatineStreakDays = (if (creatineTakenToday) 7 else 6) + (core.totalLogEntries / 12),
+            creatineStreakDays = creatineStreak,
             flaggedJoints = flaggedJoints,
+            activeCoachingDirective = meta.coachingDirective,
             timerState = meta.timer
         )
     }.stateIn(
@@ -223,8 +329,45 @@ class LockoutViewModel(
         viewModelScope.launch {
             val decision = LockoutDomainEngine.applyProgressiveOverload(exercise, rpe)
             repository.upsertExercise(decision.updatedExercise)
+            _coachingDirective.value = decision.summaryMessage
             _snackbarEvents.tryEmit(decision.summaryMessage)
         }
+    }
+
+    fun submitBiofeedback(report: BiofeedbackReport) {
+        viewModelScope.launch {
+            val prescription = LockoutDomainEngine.evaluateMesocycleFeedback(report)
+            val targets = uiState.value.allExercises.filter { it.primaryMuscle == report.muscleGroup }
+            targets.forEach { ex ->
+                val newSets = if (prescription.triggerDeload) {
+                    (ex.targetSets / 2).coerceAtLeast(2)
+                } else {
+                    (ex.targetSets + prescription.setDelta).coerceIn(2, 8)
+                }
+                val newWeight = if (prescription.triggerDeload && !ex.isIsometric) {
+                    ((ex.weightKg * 0.60f) / 2.5f).toInt() * 2.5f
+                } else ex.weightKg
+                repository.upsertExercise(ex.copy(targetSets = newSets, weightKg = newWeight))
+            }
+            _coachingDirective.value = prescription.coachingNote
+            _snackbarEvents.tryEmit(prescription.coachingNote)
+        }
+    }
+
+    fun setMuscleRecoveryOverride(muscle: MuscleGroup, status: RecoveryStatus) {
+        val currentPrefs = uiState.value.prefs
+        val overrides = LockoutDomainEngine.parseMuscleOverrides(currentPrefs.muscleOverrideCsv).toMutableMap()
+        overrides[muscle] = status
+        viewModelScope.launch {
+            repository.upsertAppPrefs(
+                currentPrefs.copy(muscleOverrideCsv = LockoutDomainEngine.serializeMuscleOverrides(overrides))
+            )
+            _snackbarEvents.tryEmit("${muscle.label} recovery updated to ${status.label}")
+        }
+    }
+
+    fun dismissCoachingDirective() {
+        _coachingDirective.value = null
     }
 
     fun applySmartSwap(exercise: ExerciseEntity, alternative: SwapAlternative) {
@@ -237,7 +380,60 @@ class LockoutViewModel(
                     coachingCue = alternative.note
                 )
             )
-            _snackbarEvents.tryEmit("Swapped to ${alternative.name} (${LockoutDomainEngine.formatKg(alternative.convertedWeightKg)})")
+            val useLbs = uiState.value.prefs.useLbs
+            _snackbarEvents.tryEmit(
+                "Swapped to ${alternative.name} (${LockoutDomainEngine.formatWeight(alternative.convertedWeightKg, useLbs)})"
+            )
+        }
+    }
+
+    fun adaptActiveDayToProfile(profile: GymProfile) {
+        viewModelScope.launch {
+            val currentDay = uiState.value.activeDayExercises
+            var swappedCount = 0
+            currentDay.forEach { ex ->
+                val needsSwap = when (profile) {
+                    GymProfile.HOTEL -> ex.isCompoundBarbell || "machine" in ex.name.lowercase() || "cable" in ex.name.lowercase()
+                    GymProfile.CALISTHENICS -> ex.isCompoundBarbell || "machine" in ex.name.lowercase() || "cable" in ex.name.lowercase() || "leg press" in ex.name.lowercase()
+                    GymProfile.HOME_GARAGE -> "machine" in ex.name.lowercase() || "pec deck" in ex.name.lowercase() || "hack squat" in ex.name.lowercase()
+                    GymProfile.COMMERCIAL -> false
+                }
+                if (needsSwap) {
+                    val alt = LockoutDomainEngine.getSmartSwapAlternatives(ex, profile).firstOrNull()
+                    if (alt != null) {
+                        repository.upsertExercise(
+                            ex.copy(
+                                name = alt.name,
+                                category = alt.category,
+                                weightKg = alt.convertedWeightKg,
+                                coachingCue = alt.note,
+                                isCompoundBarbell = false
+                            )
+                        )
+                        swappedCount++
+                    }
+                }
+            }
+            val msg = if (swappedCount > 0) {
+                "Adapted $swappedCount lifts to ${profile.label} equipment."
+            } else {
+                "All lifts in ${uiState.value.prefs.selectedDayTitle} already match ${profile.label}."
+            }
+            _coachingDirective.value = msg
+            _snackbarEvents.tryEmit(msg)
+        }
+    }
+
+    fun importPastedRoutine(rawText: String) {
+        viewModelScope.launch {
+            val prefs = uiState.value.prefs
+            val parsed = LockoutDomainEngine.parsePastedRoutine(rawText, prefs.selectedProgramId, prefs.selectedDayTitle)
+            if (parsed.isEmpty()) {
+                _snackbarEvents.tryEmit("No exercises detected. Try format: Bench Press 4x8 80kg")
+                return@launch
+            }
+            parsed.forEach { repository.upsertExercise(it) }
+            _snackbarEvents.tryEmit("Imported ${parsed.size} exercises into ${prefs.selectedDayTitle}")
         }
     }
 
@@ -347,7 +543,38 @@ class LockoutViewModel(
         )
     }
 
-    // ==================== PROGRAM & PREFS ====================
+    fun startConditioning(mode: ConditioningMode) {
+        conditioningJob?.cancel()
+        conditioningJob = viewModelScope.launch {
+            _timerState.value = _timerState.value.copy(
+                isConditioningRunning = true,
+                amrapRoundsCompleted = 0
+            )
+            timerEngine.startConditioning(mode).collect { tick ->
+                _timerState.value = _timerState.value.copy(
+                    conditioningTick = tick,
+                    isConditioningRunning = !tick.isFinished
+                )
+            }
+        }
+    }
+
+    fun incrementAmrapRound() {
+        _timerState.value = _timerState.value.copy(
+            amrapRoundsCompleted = _timerState.value.amrapRoundsCompleted + 1
+        )
+    }
+
+    fun stopConditioning() {
+        conditioningJob?.cancel()
+        _timerState.value = _timerState.value.copy(
+            conditioningTick = null,
+            isConditioningRunning = false,
+            amrapRoundsCompleted = 0
+        )
+    }
+
+    // ==================== PROGRAM, PROFILE, UNITS & ICE ====================
 
     fun selectProgram(programId: String) {
         val meta = LockoutSeedData.programs.firstOrNull { it.id == programId } ?: return
@@ -366,6 +593,23 @@ class LockoutViewModel(
         val currentPrefs = uiState.value.prefs
         viewModelScope.launch {
             repository.upsertAppPrefs(currentPrefs.copy(selectedDayTitle = dayTitle))
+        }
+    }
+
+    fun selectGymProfile(profile: GymProfile) {
+        val currentPrefs = uiState.value.prefs
+        viewModelScope.launch {
+            repository.upsertAppPrefs(currentPrefs.copy(gymProfile = profile))
+            _snackbarEvents.tryEmit("Gym Profile switched to ${profile.label}")
+        }
+    }
+
+    fun toggleWeightUnit() {
+        val currentPrefs = uiState.value.prefs
+        val nextLbs = !currentPrefs.useLbs
+        viewModelScope.launch {
+            repository.upsertAppPrefs(currentPrefs.copy(useLbs = nextLbs))
+            _snackbarEvents.tryEmit(if (nextLbs) "Units switched to Pounds (LBS)" else "Units switched to Kilograms (KG)")
         }
     }
 
@@ -399,12 +643,138 @@ class LockoutViewModel(
         }
     }
 
-    // ==================== SUPPLEMENTS ====================
+    fun updateIceCard(contactName: String, contactPhone: String, bloodType: String, allergies: String) {
+        val currentPrefs = uiState.value.prefs
+        viewModelScope.launch {
+            repository.upsertAppPrefs(
+                currentPrefs.copy(
+                    iceContactName = contactName.trim(),
+                    iceContactPhone = contactPhone.trim(),
+                    iceBloodType = bloodType.trim().ifEmpty { "O+" },
+                    iceAllergies = allergies.trim().ifEmpty { "None" }
+                )
+            )
+            _snackbarEvents.tryEmit("Emergency ICE Safety Card saved offline")
+        }
+    }
+
+    fun updateAthleteProfile(isMale: Boolean, age: Int, bodyWeightKg: Float) {
+        val currentPrefs = uiState.value.prefs
+        val currentNut = uiState.value.nutrition
+        viewModelScope.launch {
+            repository.upsertAppPrefs(currentPrefs.copy(isMale = isMale, athleteAge = age.coerceIn(15, 80)))
+            val plan = LockoutDomainEngine.calculateCaloriePlan(
+                weightKg = bodyWeightKg.coerceIn(40f, 200f),
+                heightCm = currentPrefs.athleteHeightCm,
+                ageYears = age.coerceIn(15, 80),
+                isMale = isMale,
+                activityLevel = currentPrefs.activityLevel,
+                goal = currentNut.goal
+            )
+            repository.upsertNutrition(
+                currentNut.copy(
+                    bodyWeightKg = bodyWeightKg.coerceIn(40f, 200f),
+                    caloriesTarget = if (currentNut.isTrainingDay) plan.trainingDayCalories else plan.restDayCalories,
+                    proteinTarget = plan.proteinGrams,
+                    carbsTarget = plan.carbsGrams,
+                    fatsTarget = plan.fatsGrams,
+                    waterTargetMl = plan.waterTargetMl
+                )
+            )
+        }
+    }
+
+    fun applyCalorieCalculatorPlan(
+        weightKg: Float,
+        heightCm: Int,
+        ageYears: Int,
+        isMale: Boolean,
+        activityLevel: ActivityLevel,
+        goal: NutritionGoal
+    ) {
+        val currentPrefs = uiState.value.prefs
+        val currentNut = uiState.value.nutrition
+        val plan = LockoutDomainEngine.calculateCaloriePlan(
+            weightKg = weightKg,
+            heightCm = heightCm,
+            ageYears = ageYears,
+            isMale = isMale,
+            activityLevel = activityLevel,
+            goal = goal
+        )
+        viewModelScope.launch {
+            repository.upsertAppPrefs(
+                currentPrefs.copy(
+                    athleteHeightCm = heightCm.coerceIn(130, 230),
+                    athleteAge = ageYears.coerceIn(14, 90),
+                    isMale = isMale,
+                    activityLevel = activityLevel
+                )
+            )
+            repository.upsertNutrition(
+                currentNut.copy(
+                    bodyWeightKg = weightKg.coerceIn(35f, 220f),
+                    goal = goal,
+                    caloriesTarget = if (currentNut.isTrainingDay) plan.trainingDayCalories else plan.restDayCalories,
+                    proteinTarget = plan.proteinGrams,
+                    carbsTarget = plan.carbsGrams,
+                    fatsTarget = plan.fatsGrams,
+                    waterTargetMl = plan.waterTargetMl
+                )
+            )
+            _snackbarEvents.tryEmit(
+                "Applied ${plan.targetCalories} kcal target (${plan.proteinGrams}g P / ${plan.carbsGrams}g C / ${plan.fatsGrams}g F)"
+            )
+        }
+    }
+
+    fun buildCsvExport(): String = LockoutDomainEngine.exportWorkoutCsv(uiState.value.allExercises)
+
+    fun buildJsonExport(): String = LockoutDomainEngine.exportFullJson(
+        exercises = uiState.value.allExercises,
+        supplements = uiState.value.supplements.map { it.entity },
+        nutrition = uiState.value.nutrition
+    )
+
+    // ==================== SUPPLEMENTS & DOSE ALARMS ====================
 
     fun toggleSupplement(item: SupplementDisplayItem) {
         viewModelScope.launch {
+            val willBeTaken = !item.isTakenToday
             repository.toggleSupplementForToday(item.entity, item.isTakenToday)
+            if (willBeTaken) {
+                alarmScheduler.playDoseTakenChime()
+                val nextDays = item.totalDaysTaken + 1
+                val alarmSuffix = if (item.entity.reminderEnabled) {
+                    " • Next alarm ${item.reminderTimeLabel}"
+                } else ""
+                _snackbarEvents.tryEmit("${item.entity.name} logged ($nextDays ${if (nextDays == 1) "day" else "days"} tracked)$alarmSuffix")
+            }
         }
+    }
+
+    fun updateSupplementAlarm(
+        item: SupplementDisplayItem,
+        enabled: Boolean,
+        hour: Int,
+        minute: Int
+    ) {
+        viewModelScope.launch {
+            val updated = repository.updateSupplementReminder(item.entity, enabled, hour, minute)
+            if (enabled) {
+                alarmScheduler.scheduleDailyReminder(updated)
+                val formatted = DateUtils.formatTime12h(updated.reminderHour, updated.reminderMinute)
+                _snackbarEvents.tryEmit("Daily dose alarm armed for ${updated.name} at $formatted")
+            } else {
+                alarmScheduler.cancelReminder(updated.id)
+                _snackbarEvents.tryEmit("Dose alarm turned off for ${updated.name}")
+            }
+        }
+    }
+
+    fun testSupplementAlarm(item: SupplementDisplayItem) {
+        alarmScheduler.triggerImmediateTestAlarm(item.entity)
+        _snackbarEvents.tryEmit("Test alarm triggered for ${item.entity.name} (${item.entity.dosage})")
     }
 
     fun restockSupplement(item: SupplementDisplayItem) {
@@ -436,7 +806,10 @@ class LockoutViewModel(
                     servingsLeft = servings.coerceIn(1, 365),
                     tier = "Custom",
                     cycleNote = "Daily Stack",
-                    interactionKey = key
+                    interactionKey = key,
+                    reminderEnabled = false,
+                    reminderHour = timing.defaultAlarmHour,
+                    reminderMinute = timing.defaultAlarmMinute
                 )
             )
             _snackbarEvents.tryEmit("Added ${name.trim()} to ${timing.label}")
@@ -462,7 +835,10 @@ class LockoutViewModel(
                     servingsLeft = 30,
                     tier = vaultItem.subTag.substringBefore(" •"),
                     cycleNote = "From Vault",
-                    interactionKey = key
+                    interactionKey = key,
+                    reminderEnabled = false,
+                    reminderHour = vaultItem.defaultTiming.defaultAlarmHour,
+                    reminderMinute = vaultItem.defaultTiming.defaultAlarmMinute
                 )
             )
             _snackbarEvents.tryEmit("Added ${vaultItem.name} to your Daily Stack")
@@ -473,6 +849,33 @@ class LockoutViewModel(
         viewModelScope.launch {
             repository.replaceWithGoalStack(presetId)
             _snackbarEvents.tryEmit("Loaded $presetLabel")
+        }
+    }
+
+    // ==================== HEALTHY BODY HABITS ====================
+
+    fun toggleHabit(item: HabitDisplayItem) {
+        viewModelScope.launch {
+            val nextDone = !item.isCompletedToday
+            repository.toggleHabitForToday(item.entity.id, item.isCompletedToday)
+            if (nextDone) {
+                val nextTotal = item.totalDaysCompleted + 1
+                _snackbarEvents.tryEmit("${item.entity.title} checked ($nextTotal ${if (nextTotal == 1) "day" else "days"} logged)")
+            }
+        }
+    }
+
+    fun addCustomHabit(title: String, category: String, targetLabel: String) {
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            repository.upsertHabit(
+                DailyHabitEntity(
+                    title = title.trim(),
+                    category = category.trim().ifEmpty { "Health" },
+                    targetLabel = targetLabel.trim().ifEmpty { "Daily body habit" }
+                )
+            )
+            _snackbarEvents.tryEmit("Added habit: ${title.trim()}")
         }
     }
 
@@ -496,30 +899,59 @@ class LockoutViewModel(
                     fatsGrams = current.fatsGrams + fatsGrams
                 )
             )
-            _snackbarEvents.tryEmit("Logged $name (+${proteinGrams}g protein, +${calories} kcal)")
+            _snackbarEvents.tryEmit("Logged $name (+${proteinGrams}g P, +${calories} kcal)")
         }
     }
 
     fun setNutritionGoal(goal: NutritionGoal) {
+        val prefs = uiState.value.prefs
+        val current = uiState.value.nutrition
+        val plan = LockoutDomainEngine.calculateCaloriePlan(
+            weightKg = current.bodyWeightKg,
+            heightCm = prefs.athleteHeightCm,
+            ageYears = prefs.athleteAge,
+            isMale = prefs.isMale,
+            activityLevel = prefs.activityLevel,
+            goal = goal
+        )
         viewModelScope.launch {
-            val updated = LockoutDomainEngine.recalculateMacroTargets(
-                current = uiState.value.nutrition,
-                goal = goal,
-                isTrainingDay = uiState.value.nutrition.isTrainingDay
+            repository.upsertNutrition(
+                current.copy(
+                    goal = goal,
+                    caloriesTarget = if (current.isTrainingDay) plan.trainingDayCalories else plan.restDayCalories,
+                    proteinTarget = plan.proteinGrams,
+                    carbsTarget = plan.carbsGrams,
+                    fatsTarget = plan.fatsGrams,
+                    waterTargetMl = plan.waterTargetMl
+                )
             )
-            repository.upsertNutrition(updated)
         }
     }
 
     fun toggleTrainingDayCarbCycle() {
+        val prefs = uiState.value.prefs
+        val current = uiState.value.nutrition
+        val nextTrainingDay = !current.isTrainingDay
+        val plan = LockoutDomainEngine.calculateCaloriePlan(
+            weightKg = current.bodyWeightKg,
+            heightCm = prefs.athleteHeightCm,
+            ageYears = prefs.athleteAge,
+            isMale = prefs.isMale,
+            activityLevel = prefs.activityLevel,
+            goal = current.goal
+        )
+        val newCalories = if (nextTrainingDay) plan.trainingDayCalories else plan.restDayCalories
+        val remaining = (newCalories - (plan.proteinGrams * 4) - (plan.fatsGrams * 9)).coerceAtLeast(160)
         viewModelScope.launch {
-            val current = uiState.value.nutrition
-            val updated = LockoutDomainEngine.recalculateMacroTargets(
-                current = current,
-                goal = current.goal,
-                isTrainingDay = !current.isTrainingDay
+            repository.upsertNutrition(
+                current.copy(
+                    isTrainingDay = nextTrainingDay,
+                    caloriesTarget = newCalories,
+                    proteinTarget = plan.proteinGrams,
+                    carbsTarget = remaining / 4,
+                    fatsTarget = plan.fatsGrams
+                )
             )
-            repository.upsertNutrition(updated)
         }
     }
 
@@ -544,26 +976,34 @@ class LockoutViewModel(
         val exercises: List<ExerciseEntity>,
         val supplements: List<SupplementEntity>,
         val todayTakenIds: Set<Int>,
-        val totalLogEntries: Int,
+        val allSupplementLogs: List<SupplementLogEntity>,
         val nutrition: DailyNutritionEntity
+    )
+
+    private data class HabitsBundle(
+        val habits: List<DailyHabitEntity>,
+        val todayHabitIds: Set<Int>,
+        val allHabitLogs: List<HabitLogEntity>
     )
 
     private data class MetaBundle(
         val vaultItems: List<VaultItemEntity>,
         val skills: List<SkillMilestoneEntity>,
         val prefs: AppPrefsEntity,
-        val timer: TimerOverlayState
+        val timer: TimerOverlayState,
+        val coachingDirective: String?
     )
 }
 
 class LockoutViewModelFactory(
     private val repository: LockoutRepository,
-    private val timerEngine: RestTimerEngine
+    private val timerEngine: RestTimerEngine,
+    private val alarmScheduler: SupplementAlarmScheduler
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(LockoutViewModel::class.java)) {
-            return LockoutViewModel(repository, timerEngine) as T
+            return LockoutViewModel(repository, timerEngine, alarmScheduler) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
     }

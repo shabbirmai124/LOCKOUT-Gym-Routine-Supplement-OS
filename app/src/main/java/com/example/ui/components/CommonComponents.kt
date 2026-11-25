@@ -407,3 +407,112 @@ fun ReadinessRingCanvas(
         }
     }
 }
+
+@Composable
+fun ConditioningBanner(
+    visible: Boolean,
+    tick: com.example.engine.ConditioningTick?,
+    amrapRounds: Int,
+    onAddAmrapRound: () -> Unit,
+    onStop: () -> Unit
+) {
+    val palette = LockoutColors.current
+    AnimatedVisibility(
+        visible = visible && tick != null,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        if (tick != null) {
+            val accent = if (tick.isWorkPhase) palette.volt else palette.amber
+            val mins = tick.secondsRemainingInPhase / 60
+            val secs = tick.secondsRemainingInPhase % 60
+            val timeLabel = if (mins > 0) "%d:%02d".format(mins, secs) else "${secs}s"
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("conditioning_banner"),
+                shape = RoundedCornerShape(16.dp),
+                color = palette.surface2,
+                border = BorderStroke(1.5.dp, accent.copy(alpha = 0.75f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${tick.mode.label.uppercase()} • ${tick.phaseLabel}" +
+                                if (tick.totalRounds > 1) " (${tick.currentRound}/${tick.totalRounds})" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = accent
+                        )
+                        Text(
+                            text = timeLabel,
+                            style = TabularNumberStyle.copy(fontSize = 24.sp),
+                            color = palette.textPrimary
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (tick.mode == com.example.data.ConditioningMode.AMRAP) {
+                            TextButton(onClick = onAddAmrapRound) {
+                                Text("+1 RND ($amrapRounds)", color = palette.volt, fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                        IconButton(onClick = onStop) {
+                            Icon(Icons.Default.Close, contentDescription = "Stop conditioning", tint = palette.textPrimary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CoachingDirectiveBanner(
+    directive: String?,
+    onDismiss: () -> Unit
+) {
+    val palette = LockoutColors.current
+    AnimatedVisibility(
+        visible = directive != null,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        if (directive != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = palette.surface2,
+                border = BorderStroke(1.dp, palette.cyan.copy(alpha = 0.65f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = directive,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss coaching directive",
+                            tint = palette.textSecondary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
