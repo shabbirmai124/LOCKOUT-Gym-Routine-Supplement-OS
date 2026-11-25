@@ -1,0 +1,6 @@
+{
+  "name": "LOCKOUT",
+  "description": "Iron, Routine & Supplement OS — offline-first workout logger, gymnastics skill tracker, supplement bio-timing engine, and complete gym vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

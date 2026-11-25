@@ -1,0 +1,696 @@
+Sir, **ApexForm** is a complete, production-ready Android application built in **Kotlin** using **Jetpack Compose**, **Material 3**, **MVVM**, and **Room Database**. It is engineered specifically for gym athletes, calisthenics practitioners, and gymnasts to solve daily training, progressive overload, supplement timing, hydration, and macro tracking in one unified offline-first interface.
+
+---
+
+## 1. Architecture & Core Modules
+
+* **Tech Stack:** Kotlin, Jetpack Compose (Material 3), Coroutines & `StateFlow`, Room (SQLite local persistence), ViewModel.
+* **Solved Pain Points:**
+* **Workout & Skill Progression:** Tracks both weighted gym lifts (sets/reps/kg) and gymnastic isometric holds (seconds), complete with an integrated countdown rest timer.
+* **Supplement Routine Engine:** Organizes supplements by timing window (Morning, Pre-Workout, Post-Workout, Before Bed) with dosage tracking and daily reset checklists.
+* **Hydration & Macro Dashboard:** One-tap water logging (+250 ml) and live calorie/protein progress rings.
+
+
+
+---
+
+## 2. Dependencies (`app/build.gradle.kts`)
+
+Add these dependencies to your Android Studio module-level `build.gradle.kts` file:
+
+```kotlin
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp")
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    implementation(composeBom)
+
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+
+    // Room Local Database
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+}
+
+```
+
+---
+
+## 3. Data Layer & Room Database (`data/GymModels.kt`)
+
+This layer defines the database schema for exercises, supplements, and daily nutrition metrics.
+
+```kotlin
+package com.apexform.app.data
+
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
+
+enum class SupplementTiming(val label: String) {
+    MORNING("Morning"),
+    PRE_WORKOUT("Pre-Workout"),
+    POST_WORKOUT("Post-Workout"),
+    NIGHT("Before Bed")
+}
+
+@Entity(tableName = "exercises")
+data class ExerciseEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val category: String,      // e.g., "Gymnastics", "Push", "Pull"
+    val targetSets: Int,
+    val targetRepsOrSec: String, // e.g., "10 reps" or "45s hold"
+    val weightKg: Float = 0f,
+    val completedSets: Int = 0
+)
+
+@Entity(tableName = "supplements")
+data class SupplementEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val dosage: String,
+    val timing: SupplementTiming,
+    val isTakenToday: Boolean = false,
+    val servingsLeft: Int = 30
+)
+
+data class DailyNutrition(
+    val caloriesConsumed: Int = 1850,
+    val caloriesTarget: Int = 2600,
+    val proteinGrams: Int = 135,
+    val proteinTarget: Int = 175,
+    val waterMl: Int = 2000,
+    val waterTargetMl: Int = 3500
+)
+
+@Dao
+interface GymDao {
+    @Query("SELECT * FROM exercises")
+    fun getAllExercises(): Flow<List<ExerciseEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertExercise(exercise: ExerciseEntity)
+
+    @Query("SELECT * FROM supplements")
+    fun getAllSupplements(): Flow<List<SupplementEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSupplement(supplement: SupplementEntity)
+}
+
+@Database(
+    entities = [ExerciseEntity::class, SupplementEntity::class],
+    version = 1,
+    exportSchema = false
+)
+abstract class GymDatabase : RoomDatabase() {
+    abstract fun gymDao(): GymDao
+}
+
+```
+
+---
+
+## 4. State & Business Logic (`viewmodel/GymViewModel.kt`)
+
+Manages reactive UI state, live workout rest timer countdown, supplement toggling (with automatic serving deduction), and hydration/protein updates.
+
+```kotlin
+package com.apexform.app.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.apexform.app.data.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+
+data class GymUiState(
+    val exercises: List<ExerciseEntity> = emptyList(),
+    val supplements: List<SupplementEntity> = emptyList(),
+    val nutrition: DailyNutrition = DailyNutrition(),
+    val restSecondsRemaining: Int = 0,
+    val isTimerRunning: Boolean = false
+)
+
+class GymViewModel : ViewModel() {
+
+    private val _uiState = MutableStateFlow(
+        GymUiState(
+            exercises = defaultExercises(),
+            supplements = defaultSupplements()
+        )
+    )
+    val uiState: StateFlow<GymUiState> = _uiState.asStateFlow()
+
+    private var timerJob: Job? = null
+
+    fun logSetCompleted(exerciseId: Int) {
+        _uiState.update { state ->
+            val updated = state.exercises.map { ex ->
+                if (ex.id == exerciseId) {
+                    val nextSet = if (ex.completedSets < ex.targetSets) {
+                        ex.completedSets + 1
+                    } else 0
+                    ex.copy(completedSets = nextSet)
+                } else ex
+            }
+            state.copy(exercises = updated)
+        }
+        startRestTimer(60)
+    }
+
+    fun startRestTimer(seconds: Int) {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(restSecondsRemaining = seconds, isTimerRunning = true)
+            }
+            var remaining = seconds
+            while (remaining > 0) {
+                delay(1000L)
+                remaining--
+                _uiState.update { it.copy(restSecondsRemaining = remaining) }
+            }
+            _uiState.update { it.copy(isTimerRunning = false) }
+        }
+    }
+
+    fun stopRestTimer() {
+        timerJob?.cancel()
+        _uiState.update {
+            it.copy(restSecondsRemaining = 0, isTimerRunning = false)
+        }
+    }
+
+    fun toggleSupplement(supplementId: Int) {
+        _uiState.update { state ->
+            val updated = state.supplements.map { sup ->
+                if (sup.id == supplementId) {
+                    val nowTaken = !sup.isTakenToday
+                    val newStock = if (nowTaken) {
+                        (sup.servingsLeft - 1).coerceAtLeast(0)
+                    } else {
+                        sup.servingsLeft + 1
+                    }
+                    sup.copy(isTakenToday = nowTaken, servingsLeft = newStock)
+                } else sup
+            }
+            state.copy(supplements = updated)
+        }
+    }
+
+    fun addWater(amountMl: Int = 250) {
+        _uiState.update { state ->
+            val current = state.nutrition
+            state.copy(
+                nutrition = current.copy(waterMl = current.waterMl + amountMl)
+            )
+        }
+    }
+
+    fun addProtein(grams: Int = 25, calories: Int = 120) {
+        _uiState.update { state ->
+            val current = state.nutrition
+            state.copy(
+                nutrition = current.copy(
+                    proteinGrams = current.proteinGrams + grams,
+                    caloriesConsumed = current.caloriesConsumed + calories
+                )
+            )
+        }
+    }
+
+    private fun defaultExercises() = listOf(
+        ExerciseEntity(1, "Ring Muscle-Up", "Gymnastics", 4, "5 reps", 0f),
+        ExerciseEntity(2, "Freestanding Handstand", "Gymnastics", 4, "45s hold", 0f),
+        ExerciseEntity(3, "Weighted Dips", "Strength", 4, "8 reps", 20f),
+        ExerciseEntity(4, "L-Sit on Parallettes", "Core", 3, "30s hold", 0f),
+        ExerciseEntity(5, "Barbell Back Squat", "Legs", 4, "8 reps", 90f)
+    )
+
+    private fun defaultSupplements() = listOf(
+        SupplementEntity(1, "Vitamin D3 + K2", "5000 IU", SupplementTiming.MORNING, false, 42),
+        SupplementEntity(2, "Omega-3 Fish Oil", "2000 mg", SupplementTiming.MORNING, false, 28),
+        SupplementEntity(3, "L-Citrulline Malate", "6 g", SupplementTiming.PRE_WORKOUT, false, 18),
+        SupplementEntity(4, "Whey Protein Isolate", "30 g", SupplementTiming.POST_WORKOUT, false, 24),
+        SupplementEntity(5, "Creatine Monohydrate", "5 g", SupplementTiming.POST_WORKOUT, false, 55),
+        SupplementEntity(6, "Magnesium Glycinate", "400 mg", SupplementTiming.NIGHT, false, 12)
+    )
+}
+
+```
+
+---
+
+## 5. Modern Material 3 UI (`MainActivity.kt`)
+
+Features an athletic dark OLED palette (`#0D0F12`), neon emerald performance accents (`#00E676`), bottom navigation, live rest timer banner, and interactive supplement/macro controls.
+
+```kotlin
+package com.apexform.app
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.apexform.app.data.ExerciseEntity
+import com.apexform.app.data.SupplementEntity
+import com.apexform.app.viewmodel.GymUiState
+import com.apexform.app.viewmodel.GymViewModel
+
+private val DarkBg = Color(0xFF0D0F12)
+private val CardBg = Color(0xFF171A21)
+private val AccentGreen = Color(0xFF00E676)
+private val AccentOrange = Color(0xFFFF6D00)
+private val TextPrimary = Color(0xFFF4F6F8)
+private val TextMuted = Color(0xFF9AA4B2)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    background = DarkBg,
+                    surface = CardBg,
+                    primary = AccentGreen,
+                    secondary = AccentOrange
+                )
+            ) {
+                ApexFormApp()
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ApexFormApp(viewModel: GymViewModel = viewModel()) {
+    val state by viewModel.uiState.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    Scaffold(
+        containerColor = DarkBg,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "APEXFORM",
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 2.sp,
+                        color = AccentGreen
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBg)
+            )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = CardBg) {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.Dashboard, "Dashboard") },
+                    label = { Text("Overview") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.FitnessCenter, "Workout") },
+                    label = { Text("Training") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Medication, "Supplements") },
+                    label = { Text("Stack") }
+                )
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+        ) {
+            if (state.isTimerRunning) {
+                RestTimerBanner(
+                    secondsLeft = state.restSecondsRemaining,
+                    onStop = { viewModel.stopRestTimer() }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            when (selectedTab) {
+                0 -> DashboardScreen(
+                    state = state,
+                    onAddWater = { viewModel.addWater() },
+                    onAddProtein = { viewModel.addProtein() }
+                )
+                1 -> WorkoutScreen(
+                    exercises = state.exercises,
+                    onCompleteSet = { viewModel.logSetCompleted(it) }
+                )
+                2 -> SupplementScreen(
+                    supplements = state.supplements,
+                    onToggle = { viewModel.toggleSupplement(it) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RestTimerBanner(secondsLeft: Int, onStop: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(AccentOrange.copy(alpha = 0.2f))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Timer, contentDescription = null, tint = AccentOrange)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Rest Timer: ${secondsLeft}s",
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+        }
+        TextButton(onClick = onStop) {
+            Text("SKIP", color = AccentOrange, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun DashboardScreen(
+    state: GymUiState,
+    onAddWater: () -> Unit,
+    onAddProtein: () -> Unit
+) {
+    val nutrition = state.nutrition
+    val takenSupps = state.supplements.count { it.isTakenToday }
+    val totalSetsDone = state.exercises.sumOf { it.completedSets }
+    val totalSetsTarget = state.exercises.sumOf { it.targetSets }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Text(
+                text = "Daily Performance",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+        }
+
+        // Nutrition & Protein Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Calories & Protein", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(
+                            "${nutrition.caloriesConsumed} / ${nutrition.caloriesTarget} kcal",
+                            color = AccentGreen,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = {
+                            (nutrition.proteinGrams.toFloat() / nutrition.proteinTarget)
+                                .coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = AccentGreen,
+                        trackColor = DarkBg
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Protein: ${nutrition.proteinGrams}g / ${nutrition.proteinTarget}g",
+                            color = TextMuted,
+                            fontSize = 13.sp
+                        )
+                        FilledTonalButton(onClick = onAddProtein) {
+                            Text("+25g Shake")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hydration Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Hydration", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(
+                            "${nutrition.waterMl} / ${nutrition.waterTargetMl} ml",
+                            color = TextMuted,
+                            fontSize = 14.sp
+                        )
+                    }
+                    Button(
+                        onClick = onAddWater,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                    ) {
+                        Text("+250 ml", color = DarkBg, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Readiness Summary
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SummaryStatCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Sets Done",
+                    value = "$totalSetsDone / $totalSetsTarget"
+                )
+                SummaryStatCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Supplements",
+                    value = "$takenSupps / ${state.supplements.size}"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SummaryStatCard(modifier: Modifier, title: String, value: String) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, color = TextMuted, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(value, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun WorkoutScreen(
+    exercises: List<ExerciseEntity>,
+    onCompleteSet: (Int) -> Unit
+) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text(
+                text = "Gymnastics & Strength Routine",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+        }
+        items(exercises, key = { it.id }) { ex ->
+            val isDone = ex.completedSets >= ex.targetSets
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(ex.category.uppercase(), color = AccentGreen, fontSize = 11.sp)
+                        Text(
+                            ex.name,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        val loadText = if (ex.weightKg > 0f) " • ${ex.weightKg} kg" else ""
+                        Text(
+                            "${ex.targetSets} sets × ${ex.targetRepsOrSec}$loadText",
+                            color = TextMuted,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Button(
+                        onClick = { onCompleteSet(ex.id) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDone) AccentGreen else DarkBg
+                        )
+                    ) {
+                        Text(
+                            text = "${ex.completedSets}/${ex.targetSets}",
+                            color = if (isDone) DarkBg else AccentGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SupplementScreen(
+    supplements: List<SupplementEntity>,
+    onToggle: (Int) -> Unit
+) {
+    val grouped = supplements.groupBy { it.timing }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text(
+                text = "Daily Supplement Stack",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+        }
+        grouped.forEach { (timing, list) ->
+            item {
+                Text(
+                    text = timing.label.uppercase(),
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+            items(list, key = { it.id }) { sup ->
+                Card(
+                    modifier = Modifier.clickable { onToggle(sup.id) },
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = sup.isTakenToday,
+                                onCheckedChange = { onToggle(sup.id) },
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    sup.name,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "${sup.dosage} • ${sup.servingsLeft} servings left",
+                                    color = if (sup.servingsLeft <= 15) AccentOrange else TextMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+```
+
+---
+
+## 6. Next-Level Production Upgrades
+
+To scale **ApexForm** for the Google Play Store, wire these modules next:
+
+1. **WorkManager Notifications:** Schedule exact daily push reminders for `MORNING`, `PRE_WORKOUT`, `POST_WORKOUT`, and `NIGHT` supplement windows.
+2. **Room Repository Binding:** Inject `GymDao` via **Hilt** into `GymViewModel` so completed sets, custom exercises, and low-stock supplement alerts persist across app restarts.
+3. **Skill Tree & PR Analytics:** Add a Compose Canvas line chart to plot progressive overload (kg lifted or handstand hold duration in seconds) over 30-day cycles.
+
+Sir, would you like me to add the **WorkManager supplement reminder notifications** or the **custom "Add Exercise / Add Supplement" modal dialogs** next?

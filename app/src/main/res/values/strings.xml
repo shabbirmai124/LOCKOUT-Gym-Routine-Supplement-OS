@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">LOCKOUT</string>
+    <string name="app_subtitle">IRON, ROUTINE &amp; SUPPLEMENT OS</string>
+    <string name="app_tagline">Finish Every Rep. Master Every Metric.</string>
+
+    <!-- Navigation -->
+    <string name="nav_overview">Overview</string>
+    <string name="nav_training">Training</string>
+    <string name="nav_stack">Stack</string>
+    <string name="nav_vault">Vault</string>
+
+    <!-- Actions & Accessibility -->
+    <string name="cd_toggle_theme">Toggle Obsidian Dark and Titanium Daylight mode</string>
+    <string name="cd_skill_tree">Open Gymnastic Skill Tree</string>
+    <string name="cd_injury_guard">Flag joint tightness or injury guardrails</string>
+    <string name="cd_plate_calculator">Open Visual Barbell Plate Loader</string>
+    <string name="cd_swap_exercise">Swap exercise for available equipment</string>
+    <string name="cd_add_exercise">Add custom exercise</string>
+    <string name="cd_add_supplement">Add custom supplement</string>
+    <string name="cd_rest_timer">Rest countdown timer</string>
+    <string name="cd_hold_timer">Isometric hold timer</string>
+    <string name="cd_share_pr">Preview PR Share Card</string>
+    <string name="cd_search_vault">Search Gym Vault</string>
+    <string name="cd_clear_search">Clear search query</string>
+    <string name="cd_gear_bag">Toggle item in My Gear Bag</string>
+    <string name="cd_close">Close</string>
+
+    <!-- Labels -->
+    <string name="label_daily_performance">Daily Readiness &amp; Fuel</string>
+    <string name="label_training_routine">Iron &amp; Skill Session</string>
+    <string name="label_supplement_stack">Bio-Timing Supplement OS</string>
+    <string name="label_gym_vault">Gym Vault &amp; Gear Bag</string>
+    <string name="label_skip">SKIP</string>
+    <string name="label_add_250ml">+250 ml</string>
+    <string name="label_add_500ml">+500 ml</string>
+    <string name="label_restock">RESTOCK</string>
+    <string name="label_save">Save</string>
+    <string name="label_cancel">Cancel</string>
+</resources>
